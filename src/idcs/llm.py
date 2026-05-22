@@ -13,6 +13,7 @@ constructor arg or the ``IDCS_MODEL`` env var.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Protocol, TypeVar
 
@@ -95,13 +96,27 @@ class LLM:
         *,
         max_tokens: int = 16000,
     ) -> T:
-        """Return a parsed pydantic instance of ``output_type``."""
+        """Return a parsed pydantic instance of ``output_type``.
+
+        Augments the user message with the JSON schema and the literal word
+        "JSON". Providers that honor OpenAI's ``json_schema`` mode ignore
+        this — they already get the schema via ``response_format``. Providers
+        that downgrade to ``json_object`` mode (notably Qwen/Alibaba via
+        OpenRouter) need the schema in-prompt or they don't know what fields
+        to emit, and refuse outright unless the word "JSON" appears.
+        """
+        schema_text = json.dumps(output_type.model_json_schema(), indent=2)
+        augmented_user = (
+            f"{user}\n\n"
+            f"Respond with a single JSON object matching this schema:\n"
+            f"```json\n{schema_text}\n```"
+        )
         response = self.client.beta.chat.completions.parse(
             model=self.model,
             max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": augmented_user},
             ],
             response_format=output_type,
         )
