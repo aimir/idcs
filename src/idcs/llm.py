@@ -13,6 +13,7 @@ constructor arg or the ``IDCS_MODEL`` env var.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Protocol, TypeVar
 
@@ -114,17 +115,27 @@ class LLM:
     ) -> T:
         """Return a parsed pydantic instance of ``output_type``.
 
-        Relies on ``provider.require_parameters: true`` (enabled by default)
-        to route only to providers that honor ``response_format: json_schema``,
-        so the schema reaches the model server-side and we don't need to
-        duplicate it into the user message.
+        Belt and suspenders: ``response_format`` carries the schema to
+        providers that honor ``json_schema`` mode, and a copy of the schema
+        plus the literal word "JSON" goes into the user message for providers
+        that downgrade to ``json_object`` mode. OpenRouter's
+        ``require_parameters`` filter checks parameter *names* (does the
+        provider accept ``response_format``?) not subtypes (does it honor
+        ``json_schema``?) — Alibaba/Qwen passes the filter and then strips
+        the schema, so the in-prompt copy is the actual safety net.
         """
+        schema_text = json.dumps(output_type.model_json_schema(), indent=2)
+        augmented_user = (
+            f"{user}\n\n"
+            f"Respond with a single JSON object matching this schema:\n"
+            f"```json\n{schema_text}\n```"
+        )
         response = self.client.beta.chat.completions.parse(
             model=self.model,
             max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": augmented_user},
             ],
             response_format=output_type,
             extra_body=self._extra_body,
