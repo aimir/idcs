@@ -15,12 +15,17 @@ import json
 import sys
 from pathlib import Path
 
-from idcs.distinguisher import Distinguisher
-from idcs.generator import Generator
-from idcs.llm import LLM
-from idcs.orchestrator import run_episode
-from idcs.schemas import Spec, Task
-from idcs.user_proxy import OracleUserProxy
+# Make `idcs` importable without requiring `pip install -e .`
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from idcs.distinguisher import Distinguisher  # noqa: E402
+from idcs.generator import Generator  # noqa: E402
+from idcs.llm import LLM  # noqa: E402
+from idcs.orchestrator import run_episode  # noqa: E402
+from idcs.schemas import Spec, Task  # noqa: E402
+from idcs.user_proxy import OracleUserProxy  # noqa: E402
 
 SEED_DIR = Path(__file__).resolve().parent.parent / "data" / "seed_tasks"
 
