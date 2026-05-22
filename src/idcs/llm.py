@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import openai
 from pydantic import BaseModel
@@ -63,12 +63,28 @@ class LLM:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
+        require_parameters: bool = True,
     ) -> None:
         self.client = openai.OpenAI(
             api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
             base_url=base_url,
         )
         self.model = model or os.environ.get("IDCS_MODEL") or DEFAULT_MODEL
+        self.require_parameters = require_parameters
+
+    @property
+    def _extra_body(self) -> dict[str, Any]:
+        """Provider-routing hints for OpenRouter.
+
+        ``require_parameters: true`` forces OpenRouter to only route to a
+        provider that supports every parameter we send. Critical for
+        ``response_format: json_schema`` — many models are multi-provider
+        on OpenRouter and at least one provider per model often downgrades
+        to ``json_object`` mode silently.
+        """
+        if not self.require_parameters:
+            return {}
+        return {"provider": {"require_parameters": True}}
 
     def complete(
         self,
@@ -85,6 +101,7 @@ class LLM:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            extra_body=self._extra_body,
         )
         return response.choices[0].message.content or ""
 
@@ -119,6 +136,7 @@ class LLM:
                 {"role": "user", "content": augmented_user},
             ],
             response_format=output_type,
+            extra_body=self._extra_body,
         )
         parsed = response.choices[0].message.parsed
         if parsed is None:
