@@ -101,3 +101,9 @@ class Trace(BaseModel):
     final_spec: Spec | None = None
     benchmark_score: float = 0.0
     rewards: RewardBreakdown = PydField(default_factory=RewardBreakdown)
+
+
+class IssueList(BaseModel):
+    """Distinguisher output. Wrapped because structured output is one object, not an array."""
+
+    issues: list[Issue] = PydField(default_factory=list)

@@ -1,0 +1,29 @@
+{
+  "task": {
+    "id": "seed/01-sum",
+    "prompt": "Write a function `add(a, b)` that returns the sum of two integers.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Return the integer sum of two integer arguments.",
+    "inputs": [
+      {"name": "a", "type": "int", "description": "first addend", "constraints": ["int, not bool, not float"]},
+      {"name": "b", "type": "int", "description": "second addend", "constraints": ["int, not bool, not float"]}
+    ],
+    "outputs": [
+      {"name": "result", "type": "int", "description": "a + b", "constraints": []}
+    ],
+    "preconditions": ["a and b are both Python ints (bools and floats are rejected with TypeError)"],
+    "postconditions": ["result == a + b"],
+    "invariants": [],
+    "edge_cases": [
+      "very large ints — Python's arbitrary-precision arithmetic handles them",
+      "negative ints",
+      "zero"
+    ],
+    "acceptance_criteria": [
+      "returns a + b for any pair of int inputs",
+      "raises TypeError if either argument is not an int"
+    ]
+  }
+}
