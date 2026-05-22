@@ -1,6 +1,8 @@
 """Run the G → D → user loop on each seed task and print the trace.
 
-Requires ``ANTHROPIC_API_KEY`` in the environment.
+Requires ``OPENROUTER_API_KEY`` in the environment. Optional:
+``IDCS_MODEL`` to override the default model (e.g. ``openai/gpt-4o``,
+``google/gemini-2.5-pro``).
 
 Usage:
     python scripts/cold_start.py                # all seed tasks

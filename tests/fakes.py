@@ -41,8 +41,6 @@ class FakeLLM:
         user: str,
         *,
         max_tokens: int = 16000,
-        thinking: bool = False,
-        cache_system: bool = True,
     ) -> str:
         self.text_calls.append((system, user))
         if self.text_responder is not None:
@@ -58,8 +56,6 @@ class FakeLLM:
         output_type: type[T],
         *,
         max_tokens: int = 16000,
-        thinking: bool = False,
-        cache_system: bool = True,
     ) -> T:
         self.typed_calls.append((system, user, output_type))
         if self.typed_responder is not None:
