@@ -20,6 +20,11 @@ For each issue, decide its route:
   improve the spec (typical for ambiguity about intent, safety-critical
   defaults, or design choices not implied by the task).
 
+**Prefer generator-routed.** When the task description gives any signal at
+all about the right answer (language conventions, common-sense defaults,
+existing constraints elsewhere in the task), use it and route to the
+generator. Escalate to the user only when the task is genuinely silent.
+
 For user-routed issues, include a `suggested_question` — a single concrete
 question the user should answer.
 
@@ -29,6 +34,10 @@ question the user should answer.
   possible edge case — only those that affect correct behavior.
 - Prefer fewer, higher-quality issues to many low-value ones.
 - Return an empty list if the spec is satisfactory.
+- **Resolved is resolved.** If the spec explicitly picks one alternative
+  over another (e.g., "by X, not Y" or "strict, with no preprocessing"),
+  that ambiguity has been settled. Do not re-flag it because the rejected
+  alternative is still mentioned in the spec text.
 
 ## Location format
 
