@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ from idcs.schemas import Trace
 def create_run_dir(root: Path | None = None) -> Path:
     base = root or (Path(__file__).resolve().parents[2] / "experiments" / "runs")
     base.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run_dir = base / timestamp
     if not run_dir.exists():
         run_dir.mkdir()

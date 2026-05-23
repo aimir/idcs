@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import random
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
-from typing import Callable
-
-import hashlib
-import random
 
 from idcs.benchmark.scoring import score
 from idcs.coder import Coder
@@ -18,8 +17,8 @@ from idcs.llm import LLMClient
 from idcs.optimizer.mutate import Mutator
 from idcs.optimizer.population import Population, PromptCandidate
 from idcs.orchestrator import run_episode
-from idcs.rewards import RewardBreakdown, RewardWeights, compute_reward_breakdown
-from idcs.schemas import Task, Trace
+from idcs.rewards import RewardWeights, compute_reward_breakdown
+from idcs.schemas import RewardBreakdown, Task, Trace
 from idcs.telemetry import create_run_dir, write_metrics, write_trace
 from idcs.user_proxy import UserProxy
 
