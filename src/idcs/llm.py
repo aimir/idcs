@@ -14,6 +14,7 @@ constructor arg or the ``IDCS_MODEL`` env var.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import time
@@ -24,6 +25,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import openai
+
+log = logging.getLogger(__name__)
 from pydantic import BaseModel
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
@@ -36,14 +39,18 @@ def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_re
     for attempt in range(max_retries + 1):
         try:
             return fn()
-        except openai.RateLimitError:
+        except openai.RateLimitError as e:
             if attempt == max_retries:
                 raise
+            delay = (2**attempt) + random.uniform(0, 1)
+            log.warning("429 rate-limited, retry %d/%d in %.1fs", attempt + 1, max_retries, delay)
+            time.sleep(delay)
         except openai.APIStatusError as e:
             if e.status_code < 500 or attempt == max_retries:
                 raise
-        delay = (2**attempt) + random.uniform(0, 1)
-        time.sleep(delay)
+            delay = (2**attempt) + random.uniform(0, 1)
+            log.warning("%d server error, retry %d/%d in %.1fs", e.status_code, attempt + 1, max_retries, delay)
+            time.sleep(delay)
     raise AssertionError("unreachable")
 
 T = TypeVar("T", bound=BaseModel)
