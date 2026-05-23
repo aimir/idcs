@@ -7,9 +7,7 @@ next builds on it.
 
 - Repo layout, `pyproject.toml`, ruff/mypy/pytest.
 - `schemas.py` — pydantic models from `design.md`.
-- `llm.py` — Anthropic SDK wrapper with prompt caching enabled.
-- Sandbox for code execution (firejail / subprocess with rlimits, or a
-  container).
+- `llm.py` — OpenAI SDK wrapper pointed at OpenRouter with caching enabled.
 
 **Exit criterion**: `pytest` passes on schema round-trips; `llm.py` can make
 a cached call.
@@ -25,16 +23,25 @@ a cached call.
 computation yet — we are sanity-checking that the loop produces meaningful
 specs at all.
 
-## Phase 2 — Benchmark + scoring (2–3 days)
+## Phase 2 — External benchmark integration (3–4 days)
 
-- Pick **MBPP+** first (smaller, faster, well-tested than HumanEval+).
-- `coder.py` (spec → code, frozen prompt) and `benchmark/runner.py`.
+Code execution and grading are intentionally out of scope for this project.
+We wrap an off-the-shelf benchmark library that already does both.
+Default: **EvalPlus** (MBPP+ / HumanEval+). Swap by changing the adapter.
+
+- Add the library as a dependency.
+- `src/idcs/benchmark/tasks.py` — thin adapter that loads benchmark tasks
+  from the library and normalizes them to our `Task` schema.
+- `src/idcs/coder.py` (frozen prompt) — Spec → Python source. This is the
+  "model" the library scores.
+- `src/idcs/benchmark/scoring.py` — wrap the library's grader call so the
+  rest of the pipeline gets a single `score(task, code) -> float`.
 - Establish two baselines:
-  - (a) input → code directly
-  - (b) input → spec → code with fixed prompts
+  - (a) input → code directly (no spec)
+  - (b) input → spec → code with frozen prompts
 
-**Exit criterion**: (b) beats (a). If it doesn't, fix the spec format
-before adding any optimization machinery.
+**Exit criterion**: (b) beats (a) on the library's scoring. If it doesn't,
+fix the spec format before adding any optimization machinery.
 
 ## Phase 3 — Rewards + telemetry (2 days)
 
