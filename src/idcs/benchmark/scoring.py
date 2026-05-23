@@ -1,82 +1,44 @@
 """Score generated code against a task's tests.
 
-Two paths:
+Two paths, dispatched on ``task.id``:
 
-- **MBPP+ tasks** (``Mbpp/...`` ids) → EvalPlus's ``check_correctness``,
-  scoring against the ``plus_input`` set only (the harder cases designed to
-  catch implementations that pattern-match prompt examples without
-  understanding the task). EvalPlus runs the code in a subprocess; we
-  don't host code execution here.
-- **Seed-corpus tasks** (``seed/...`` ids) → local ``exec``. Trusted: tests
-  are short asserts we wrote ourselves; code is short and constrained to
-  the seed task. No subprocess overhead; fine for the size of the corpus.
-
-``score(task, code)`` dispatches on ``task.id`` so callers don't care.
-
-**macOS workaround**: EvalPlus's ``reliability_guard`` tries to set
-``RLIMIT_AS`` which non-root processes cannot do on macOS, killing the
-worker. We force ``multiprocessing`` to ``fork`` (so the in-parent stub
-propagates to the worker) and stub the memory limit out. Removable once
-upstream EvalPlus handles macOS.
+- **MBPP+ tasks** (``Mbpp/...``) — we use EvalPlus for the test **data**
+  (``plus_input`` cases plus the expected outputs from
+  ``get_groundtruth``) but run user code in *our own subprocess*. EvalPlus's
+  in-process grader uses ``reliability_guard`` which calls ``setrlimit``
+  for ``RLIMIT_AS``; macOS doesn't honor that for non-root processes, so
+  the worker dies before producing results. Subprocess isolation is
+  weaker than EvalPlus's grader but works on every platform, is
+  crash-safe, and the scoring logic is trivial — comparing actual to
+  ``get_groundtruth``'s expected output per input.
+- **Seed-corpus tasks** (``seed/...``) — local ``exec`` in this process
+  (trusted short asserts we wrote).
 """
 
 from __future__ import annotations
 
-import contextlib
-import multiprocessing
+import json
+import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from idcs.schemas import Task
 
-
-@lru_cache(maxsize=1)
-def _apply_macos_compat() -> None:
-    """No-op off macOS; otherwise patch EvalPlus to survive RLIMIT_AS.
-
-    EvalPlus's worker (``evalplus.eval.unsafe_execute``) calls
-    ``reliability_guard`` via a name imported into its module namespace
-    at *import* time:
-
-        from evalplus.eval.utils import reliability_guard
-
-    That creates two bindings — ``evalplus.eval.utils.reliability_guard``
-    (canonical) and ``evalplus.eval.reliability_guard`` (the one the
-    worker actually looks up). Patching only the canonical name leaves
-    the worker calling the original. We patch **both**, then force
-    multiprocessing to ``fork`` so the patched module state propagates
-    to the worker process.
-    """
-    if sys.platform != "darwin":
-        return
-    with contextlib.suppress(RuntimeError, ValueError):
-        multiprocessing.set_start_method("fork", force=True)
-    try:
-        import evalplus.eval as _ee
-        from evalplus.eval import utils as _eu
-
-        _original = _eu.reliability_guard
-
-        def _macos_safe(maximum_memory_bytes: int | None = None) -> None:
-            # Skip the RLIMIT_AS / RLIMIT_DATA path; keep upstream's
-            # builtin-disabling effects by calling with None.
-            _original(maximum_memory_bytes=None)
-
-        _eu.reliability_guard = _macos_safe
-        _ee.reliability_guard = _macos_safe  # the binding unsafe_execute resolves
-    except ImportError:
-        pass
+SUBPROCESS_TIMEOUT = 30.0
+SCORE_MARKER = "__IDCS_SCORES__"
 
 
 @dataclass
 class ScoreResult:
     """Per-task scoring outcome.
 
-    ``pass_rate`` is the headline number. For MBPP+ it's the fraction of
-    ``plus_input`` cases that passed. ``base_pass_rate`` is reported for
-    diagnostics — seeing base=1.0, plus=0.4 confirms a pattern-match.
+    ``pass_rate`` is the headline number — for MBPP+ tasks it's the
+    ``plus_input`` pass fraction. ``base_pass_rate`` is reported for
+    diagnostics: base=1.0 / plus=0.4 confirms a pattern-match.
     """
 
     pass_count: int
@@ -87,26 +49,24 @@ class ScoreResult:
 
 
 def score(task: Task, code: str) -> float:
-    """Headline pass rate in [0, 1]. Dispatches by task source."""
     return score_detailed(task, code).pass_rate
 
 
 def score_detailed(task: Task, code: str) -> ScoreResult:
-    """Detailed score. Dispatches by task source."""
     if task.id.startswith("Mbpp/"):
         return _score_mbpp_plus(task, code)
     return _score_local(task, code)
 
 
-# ---- MBPP+ via EvalPlus ----
+# ---- MBPP+: EvalPlus data, our subprocess ----
 
 
 @lru_cache(maxsize=1)
 def _mbpp_groundtruth() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Memoized: (problems, expected_output) for MBPP+.
+    """Memoized (problems, expected_output) for MBPP+.
 
-    ``get_groundtruth`` is expensive (runs canonical solutions on every
-    input to derive expected outputs); we cache it for the process.
+    ``get_groundtruth`` runs the canonical solutions to derive expected
+    outputs; cache it for the process lifetime.
     """
     from evalplus.data import get_mbpp_plus, get_mbpp_plus_hash
     from evalplus.evaluate import MBPP_OUTPUT_NOT_NONE_TASKS, get_groundtruth
@@ -117,36 +77,35 @@ def _mbpp_groundtruth() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _score_mbpp_plus(task: Task, code: str) -> ScoreResult:
-    _apply_macos_compat()
-    from evalplus.evaluate import check_correctness
-
     problems, expected = _mbpp_groundtruth()
     if task.id not in problems:
-        raise ValueError(f"{task.id!r} not in MBPP+; cannot grade via EvalPlus.")
+        raise ValueError(f"{task.id!r} not in MBPP+; cannot grade.")
 
-    result = check_correctness(
-        dataset="mbpp",
-        completion_id=0,
-        problem=problems[task.id],
-        solution=code,
-        expected_output=expected[task.id],
-        base_only=False,
-        identifier=task.id,
-    )
+    problem = problems[task.id]
+    entry_point = problem.get("entry_point") or ""
+    if not entry_point:
+        return ScoreResult(0, 0, 0.0, errors=["MBPP+ task missing entry_point"])
 
-    plus_status, plus_results = _unpack(result.get("plus"))
-    base_status, base_results = _unpack(result.get("base"))
+    plus_inputs = list(problem.get("plus_input") or [])
+    plus_expected = list(expected[task.id].get("plus") or [])
+    base_inputs = list(problem.get("base_input") or [])
+    base_expected = list(expected[task.id].get("base") or [])
 
-    plus_passed = sum(1 for r in plus_results if r is True)
+    plus_results, plus_err = _run_grader(code, entry_point, plus_inputs, plus_expected)
+    base_results, base_err = _run_grader(code, entry_point, base_inputs, base_expected)
+
+    plus_passed = sum(1 for r in plus_results if r)
     plus_total = len(plus_results)
-    base_passed = sum(1 for r in base_results if r is True)
+    base_passed = sum(1 for r in base_results if r)
     base_total = len(base_results)
 
     errors: list[str] = []
-    if plus_status not in ("base only", "pass") and plus_total == 0:
-        errors.append(f"plus status: {plus_status}")
-    if plus_status not in ("pass",) and plus_total > 0:
-        errors.append(f"plus status: {plus_status}")
+    if plus_err:
+        errors.append(f"plus: {plus_err}")
+    # Don't double-report — if user code didn't even define entry_point,
+    # both runs will hit the same error.
+    elif base_err:
+        errors.append(f"base: {base_err}")
 
     return ScoreResult(
         pass_count=plus_passed,
@@ -157,15 +116,85 @@ def _score_mbpp_plus(task: Task, code: str) -> ScoreResult:
     )
 
 
-def _unpack(entry: Any) -> tuple[str, list[Any]]:
-    """``check_correctness`` returns either (status, per-input-list) or None."""
-    if entry is None:
-        return "missing", []
-    status, results = entry
-    return status, list(results) if results is not None else []
+# Harness template: user code at module top level, then iterate inputs
+# and print pass/fail booleans behind a marker so we can find them
+# even if the user code itself prints to stdout.
+_HARNESS = '''\
+import sys
+
+# ----- USER CODE -----
+{code}
+# ----- END USER CODE -----
+
+_inputs = {inputs}
+_expected = {expected}
+_results = []
+for _inp, _exp in zip(_inputs, _expected):
+    try:
+        _actual = {entry}(*_inp)
+        _results.append(_actual == _exp)
+    except BaseException:
+        _results.append(False)
+
+import json
+sys.stdout.write({marker!r} + json.dumps(_results))
+'''
 
 
-# ---- Local exec for seed tasks ----
+def _run_grader(
+    code: str,
+    entry: str,
+    inputs: list[Any],
+    expected: list[Any],
+    timeout_s: float = SUBPROCESS_TIMEOUT,
+) -> tuple[list[bool], str | None]:
+    if not inputs:
+        return [], None
+
+    try:
+        harness = _HARNESS.format(
+            code=code,
+            inputs=repr(inputs),
+            expected=repr(expected),
+            entry=entry,
+            marker=SCORE_MARKER,
+        )
+    except Exception as e:
+        return [False] * len(inputs), f"harness format failed: {e}"
+
+    with tempfile.NamedTemporaryFile(
+        suffix=".py", mode="w", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(harness)
+        script_path = Path(f.name)
+    try:
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script_path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return [False] * len(inputs), "subprocess timeout"
+    finally:
+        script_path.unlink(missing_ok=True)
+
+    idx = proc.stdout.rfind(SCORE_MARKER)
+    if idx == -1:
+        tail = (proc.stderr.strip().splitlines() or [""])[-1]
+        return [False] * len(inputs), f"no scores in stdout (stderr: {tail[:200]})"
+    try:
+        results = json.loads(proc.stdout[idx + len(SCORE_MARKER) :])
+    except json.JSONDecodeError as e:
+        return [False] * len(inputs), f"JSON parse: {e}"
+    if not isinstance(results, list):
+        return [False] * len(inputs), f"unexpected payload type: {type(results).__name__}"
+    return [bool(r) for r in results], None
+
+
+# ---- Seed corpus: local exec for trusted short asserts ----
 
 
 def _score_local(task: Task, code: str) -> ScoreResult:
@@ -201,3 +230,4 @@ def _score_local(task: Task, code: str) -> ScoreResult:
         pass_rate=passed / total,
         errors=errors,
     )
+

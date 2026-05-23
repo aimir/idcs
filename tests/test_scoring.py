@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import patch
 
 from idcs.benchmark.scoring import score, score_detailed
@@ -20,7 +19,7 @@ def _seed_task(tests: list[str], entry_point: str = "add") -> Task:
 
 
 def _mbpp_task() -> Task:
-    """Build an Mbpp/* task — routes to the EvalPlus scorer."""
+    """Build an Mbpp/* task — routes to the EvalPlus-data + subprocess scorer."""
     return Task(id="Mbpp/2", prompt="", entry_point="add", tests=[])
 
 
@@ -61,54 +60,131 @@ class TestLocalScorer:
         assert result.base_pass_rate is None  # local backend doesn't set this
 
 
-# ---- EvalPlus backend (MBPP+ tasks) ----
+# ---- MBPP+ backend (EvalPlus data + our subprocess) ----
 
 
 class TestMbppPlusScorer:
-    def _patch_groundtruth(self) -> Any:  # type: ignore[no-untyped-def]
-        problems = {"Mbpp/2": {"task_id": "Mbpp/2", "entry_point": "add"}}
-        expected: dict[str, Any] = {"Mbpp/2": {}}
-        return patch(
-            "idcs.benchmark.scoring._mbpp_groundtruth",
-            return_value=(problems, expected),
-        )
+    """The subprocess seam is ``_run_grader`` — mock it to skip real exec."""
+
+    def _problems(self) -> dict[str, dict[str, object]]:
+        return {
+            "Mbpp/2": {
+                "task_id": "Mbpp/2",
+                "entry_point": "add",
+                "plus_input": [[1, 2], [3, 4], [5, 6]],
+                "base_input": [[0, 0], [1, 1]],
+            }
+        }
+
+    def _expected(self) -> dict[str, dict[str, list[object]]]:
+        return {"Mbpp/2": {"plus": [3, 7, 11], "base": [0, 2]}}
 
     def test_all_plus_pass(self) -> None:
-        with self._patch_groundtruth(), patch(
-            "evalplus.evaluate.check_correctness",
-            return_value={
-                "base": ("pass", [True, True]),
-                "plus": ("pass", [True, True, True]),
-            },
+        with patch(
+            "idcs.benchmark.scoring._mbpp_groundtruth",
+            return_value=(self._problems(), self._expected()),
+        ), patch(
+            "idcs.benchmark.scoring._run_grader",
+            side_effect=[
+                ([True, True, True], None),  # plus
+                ([True, True], None),  # base
+            ],
         ):
             result = score_detailed(_mbpp_task(), "def add(a,b): return a+b")
         assert result.pass_rate == 1.0
         assert result.pass_count == 3
         assert result.total_count == 3
         assert result.base_pass_rate == 1.0
+        assert result.errors == []
 
-    def test_plus_partial(self) -> None:
-        with self._patch_groundtruth(), patch(
-            "evalplus.evaluate.check_correctness",
-            return_value={
-                "base": ("pass", [True, True]),
-                "plus": ("fail", [True, False, False, True]),
-            },
-        ):
-            result = score_detailed(_mbpp_task(), "def add(a,b): return a+b")
-        # Pattern-match signature: base full, plus partial.
-        assert result.pass_rate == 0.5
-        assert result.base_pass_rate == 1.0
-        assert any("plus status" in e for e in result.errors)
-
-    def test_missing_task_raises(self) -> None:
+    def test_plus_partial_base_full_signals_pattern_match(self) -> None:
         with patch(
             "idcs.benchmark.scoring._mbpp_groundtruth",
-            return_value=({}, {}),
+            return_value=(self._problems(), self._expected()),
+        ), patch(
+            "idcs.benchmark.scoring._run_grader",
+            side_effect=[
+                ([True, False, False], None),  # plus
+                ([True, True], None),  # base
+            ],
         ):
+            result = score_detailed(_mbpp_task(), "def add(a,b): return a+b")
+        assert result.pass_rate == 1 / 3
+        assert result.base_pass_rate == 1.0
+
+    def test_subprocess_error_surfaces(self) -> None:
+        with patch(
+            "idcs.benchmark.scoring._mbpp_groundtruth",
+            return_value=(self._problems(), self._expected()),
+        ), patch(
+            "idcs.benchmark.scoring._run_grader",
+            side_effect=[
+                ([False, False, False], "subprocess timeout"),
+                ([False, False], "subprocess timeout"),
+            ],
+        ):
+            result = score_detailed(_mbpp_task(), "while True: pass")
+        assert result.pass_rate == 0.0
+        assert any("timeout" in e for e in result.errors)
+
+    def test_missing_task_raises(self) -> None:
+        with patch("idcs.benchmark.scoring._mbpp_groundtruth", return_value=({}, {})):
             try:
                 score_detailed(_mbpp_task(), "def add(a,b): return a+b")
             except ValueError as e:
                 assert "Mbpp/2" in str(e)
             else:
                 raise AssertionError("expected ValueError")
+
+
+class TestRunGraderEndToEnd:
+    """Cross-check that the actual subprocess harness works (no mock)."""
+
+    def test_correct_code_passes_all_inputs(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        results, err = _run_grader(
+            code="def add(a, b):\n    return a + b\n",
+            entry="add",
+            inputs=[[1, 2], [3, 4], [10, 20]],
+            expected=[3, 7, 30],
+        )
+        assert err is None
+        assert results == [True, True, True]
+
+    def test_wrong_code_fails_all(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        results, err = _run_grader(
+            code="def add(a, b):\n    return 0\n",
+            entry="add",
+            inputs=[[1, 2], [3, 4]],
+            expected=[3, 7],
+        )
+        assert err is None
+        assert results == [False, False]
+
+    def test_missing_entry_point_fails_all(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        results, err = _run_grader(
+            code="def other(): return 1\n",
+            entry="add",
+            inputs=[[1, 2]],
+            expected=[3],
+        )
+        assert err is None
+        assert results == [False]
+
+    def test_tuple_inputs_unpack_correctly(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        # MBPP+ inputs are often nested tuples; repr round-trips them.
+        results, err = _run_grader(
+            code="def f(a, b):\n    return tuple(sorted(set(a) & set(b)))\n",
+            entry="f",
+            inputs=[[(3, 4, 5, 6), (5, 7, 4, 10)]],
+            expected=[(4, 5)],
+        )
+        assert err is None
+        assert results == [True]
