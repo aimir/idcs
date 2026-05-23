@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Protocol, TypeVar
+import random
+import time
+from typing import Any, Callable, Protocol, TypeVar
 
 from dotenv import load_dotenv
 
@@ -26,8 +28,26 @@ from pydantic import BaseModel
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+MAX_RETRIES = 5
+
+
+def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_ret:
+    """Call fn(), retrying on transient 429/5xx with exponential backoff."""
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except openai.RateLimitError:
+            if attempt == max_retries:
+                raise
+        except openai.APIStatusError as e:
+            if e.status_code < 500 or attempt == max_retries:
+                raise
+        delay = (2**attempt) + random.uniform(0, 1)
+        time.sleep(delay)
+    raise AssertionError("unreachable")
 
 T = TypeVar("T", bound=BaseModel)
+T_ret = TypeVar("T_ret")
 
 
 class LLMClient(Protocol):
@@ -98,14 +118,16 @@ class LLM:
         max_tokens: int = 16000,
     ) -> str:
         """Return the assistant message's text content (empty string if absent)."""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            extra_body=self._extra_body,
+        response = _with_retry(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                extra_body=self._extra_body,
+            )
         )
         return response.choices[0].message.content or ""
 
@@ -134,15 +156,17 @@ class LLM:
             f"Respond with a single JSON object matching this schema:\n"
             f"```json\n{schema_text}\n```"
         )
-        response = self.client.beta.chat.completions.parse(
-            model=self.model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": augmented_user},
-            ],
-            response_format=output_type,
-            extra_body=self._extra_body,
+        response = _with_retry(
+            lambda: self.client.beta.chat.completions.parse(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": augmented_user},
+                ],
+                response_format=output_type,
+                extra_body=self._extra_body,
+            )
         )
         parsed = response.choices[0].message.parsed
         if parsed is None:
