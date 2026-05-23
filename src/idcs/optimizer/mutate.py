@@ -35,6 +35,8 @@ class Mutator:
             f"FEEDBACK:\n{feedback}\n\n"
             f"Return {count} improved prompts."
         )
-        result = self.llm.complete_typed(self.system_prompt, user, MutationBatch, max_tokens=max_tokens)
+        result = self.llm.complete_typed(
+            self.system_prompt, user, MutationBatch, max_tokens=max_tokens
+        )
         cleaned = [prompt.strip() for prompt in result.prompts if prompt.strip()]
         return cleaned[:count]

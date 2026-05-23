@@ -95,7 +95,7 @@ def _count_type1_fixed(trace: Trace) -> int:
     if len(trace.turns) < 2:
         return 0
     fixed = 0
-    for current, nxt in zip(trace.turns, trace.turns[1:]):
+    for current, nxt in zip(trace.turns, trace.turns[1:], strict=False):
         current_keys = {_issue_key(issue) for issue in current.issues if issue.route == "generator"}
         if not current_keys:
             continue
