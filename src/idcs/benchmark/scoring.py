@@ -12,15 +12,46 @@ Two paths:
   the seed task. No subprocess overhead; fine for the size of the corpus.
 
 ``score(task, code)`` dispatches on ``task.id`` so callers don't care.
+
+**macOS workaround**: EvalPlus's ``reliability_guard`` tries to set
+``RLIMIT_AS`` which non-root processes cannot do on macOS, killing the
+worker. We force ``multiprocessing`` to ``fork`` (so the in-parent stub
+propagates to the worker) and stub the memory limit out. Removable once
+upstream EvalPlus handles macOS.
 """
 
 from __future__ import annotations
 
+import contextlib
+import multiprocessing
+import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
 from idcs.schemas import Task
+
+
+@lru_cache(maxsize=1)
+def _apply_macos_compat() -> None:
+    """No-op off macOS; otherwise patch EvalPlus to survive RLIMIT_AS."""
+    if sys.platform != "darwin":
+        return
+    with contextlib.suppress(RuntimeError, ValueError):
+        multiprocessing.set_start_method("fork", force=True)
+    try:
+        from evalplus.eval import utils as _eu
+
+        _original = _eu.reliability_guard
+
+        def _macos_safe(maximum_memory_bytes: int | None = None) -> None:
+            # Skip the RLIMIT_AS / RLIMIT_DATA path; keep upstream's
+            # builtin-disabling effects by calling with None.
+            _original(maximum_memory_bytes=None)
+
+        _eu.reliability_guard = _macos_safe
+    except ImportError:
+        pass
 
 
 @dataclass
@@ -70,6 +101,7 @@ def _mbpp_groundtruth() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _score_mbpp_plus(task: Task, code: str) -> ScoreResult:
+    _apply_macos_compat()
     from evalplus.evaluate import check_correctness
 
     problems, expected = _mbpp_groundtruth()
