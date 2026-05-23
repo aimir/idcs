@@ -1,0 +1,29 @@
+{
+  "task": {
+    "id": "seed/03-max-of-list",
+    "prompt": "Write a function `max_of(xs)` that returns the largest element of a list of numbers.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Return the maximum element of a list of int or float.",
+    "inputs": [
+      {"name": "xs", "type": "list of int | float", "description": "non-empty list of numbers", "constraints": ["len(xs) >= 1"]}
+    ],
+    "outputs": [
+      {"name": "result", "type": "int | float", "description": "the largest element of xs", "constraints": []}
+    ],
+    "preconditions": ["xs is a non-empty list of int or float"],
+    "postconditions": ["result is an element of xs", "result >= every element of xs (under normal float ordering)"],
+    "invariants": [],
+    "edge_cases": [
+      "single-element list returns that element",
+      "ties: any of the maximal elements may be returned (caller must not assume which)",
+      "empty list: raises ValueError",
+      "NaN present: behavior is unspecified (Python's built-in max is non-deterministic with NaN)"
+    ],
+    "acceptance_criteria": [
+      "returns the largest element for any non-empty list of finite numbers",
+      "raises ValueError for an empty list"
+    ]
+  }
+}

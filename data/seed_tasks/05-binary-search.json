@@ -1,0 +1,31 @@
+{
+  "task": {
+    "id": "seed/05-binary-search",
+    "prompt": "Write a function `bsearch(xs, target)` that returns the index of `target` in the sorted list `xs`, or -1 if not present.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Locate `target` in a sorted list using O(log n) comparisons; return its index, or -1 if absent.",
+    "inputs": [
+      {"name": "xs", "type": "list of int", "description": "list sorted in non-decreasing order", "constraints": ["sorted ascending", "all elements are int"]},
+      {"name": "target", "type": "int", "description": "the value to find", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "int", "description": "an index i such that xs[i] == target, or -1 if no such index exists", "constraints": []}
+    ],
+    "preconditions": ["xs is sorted in non-decreasing order (caller's responsibility — not verified)"],
+    "postconditions": ["if target in xs then xs[result] == target; otherwise result == -1"],
+    "invariants": [],
+    "edge_cases": [
+      "empty list returns -1",
+      "target smaller than all elements returns -1",
+      "target larger than all elements returns -1",
+      "duplicates: any matching index may be returned (caller must not assume leftmost / rightmost)",
+      "single-element list: returns 0 if it matches, -1 otherwise"
+    ],
+    "acceptance_criteria": [
+      "for any sorted list xs and any int target, returns an index i with xs[i] == target if one exists, else -1",
+      "runs in O(log n) time (binary, not linear, search)"
+    ]
+  }
+}

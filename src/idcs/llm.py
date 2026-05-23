@@ -1,37 +1,90 @@
-"""Thin Anthropic SDK wrapper.
+"""Thin OpenAI-SDK wrapper pointed at OpenRouter.
 
-Defaults to claude-opus-4-7 with prompt caching on the system prompt and
-adaptive thinking off. G and D will both call through this — keeping it tiny
-and uniform means changing the model or caching strategy is one edit.
+OpenRouter exposes an OpenAI-compatible API and routes to many providers
+(Anthropic, OpenAI, Google, Meta, ...). Switching providers is a model-id
+change rather than a code change, which keeps the rest of the pipeline
+single-shape.
 
-Note: prompt caching has a model-dependent minimum prefix length (~4K tokens
-on Opus 4.7). Short system prompts get the cache_control marker but the API
-silently skips caching them. That is fine — once prompts grow during
-optimization the cache kicks in for free.
+Defaults to ``anthropic/claude-sonnet-4.5`` since the project is shaped
+around Claude-style structured outputs, but any model that supports
+JSON-schema ``response_format`` will work — override via the ``model``
+constructor arg or the ``IDCS_MODEL`` env var.
 """
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
-import anthropic
+import openai
+from pydantic import BaseModel
 
-DEFAULT_MODEL = "claude-opus-4-7"
+DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+
+T = TypeVar("T", bound=BaseModel)
+
+
+class LLMClient(Protocol):
+    """Structural type the rest of the pipeline depends on.
+
+    The concrete ``LLM`` below satisfies this. Tests pass in a fake.
+    """
+
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int = ...,
+    ) -> str: ...
+
+    def complete_typed(
+        self,
+        system: str,
+        user: str,
+        output_type: type[T],
+        *,
+        max_tokens: int = ...,
+    ) -> T: ...
 
 
 class LLM:
-    """One-shot completion wrapper with cached system prompts."""
+    """One-shot completion wrapper.
+
+    Uses OpenAI's ``chat.completions`` API (the format OpenRouter exposes).
+    Structured output goes through ``beta.chat.completions.parse``, which
+    serializes a Pydantic model to JSON schema and validates the response.
+    """
 
     def __init__(
         self,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         api_key: str | None = None,
+        base_url: str = DEFAULT_BASE_URL,
+        require_parameters: bool = True,
     ) -> None:
-        self.client = anthropic.Anthropic(
-            api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
+        self.client = openai.OpenAI(
+            api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
+            base_url=base_url,
         )
-        self.model = model
+        self.model = model or os.environ.get("IDCS_MODEL") or DEFAULT_MODEL
+        self.require_parameters = require_parameters
+
+    @property
+    def _extra_body(self) -> dict[str, Any]:
+        """Provider-routing hints for OpenRouter.
+
+        ``require_parameters: true`` forces OpenRouter to only route to a
+        provider that supports every parameter we send. Critical for
+        ``response_format: json_schema`` — many models are multi-provider
+        on OpenRouter and at least one provider per model often downgrades
+        to ``json_object`` mode silently.
+        """
+        if not self.require_parameters:
+            return {}
+        return {"provider": {"require_parameters": True}}
 
     def complete(
         self,
@@ -39,31 +92,58 @@ class LLM:
         user: str,
         *,
         max_tokens: int = 16000,
-        thinking: bool = False,
-        cache_system: bool = True,
     ) -> str:
-        """Return the concatenated text content of one completion.
+        """Return the assistant message's text content (empty string if absent)."""
+        response = self.client.chat.completions.create(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            extra_body=self._extra_body,
+        )
+        return response.choices[0].message.content or ""
 
-        Streams when max_tokens exceeds the safe non-streaming threshold,
-        so callers can bump max_tokens without worrying about SDK timeouts.
+    def complete_typed(
+        self,
+        system: str,
+        user: str,
+        output_type: type[T],
+        *,
+        max_tokens: int = 16000,
+    ) -> T:
+        """Return a parsed pydantic instance of ``output_type``.
+
+        Belt and suspenders: ``response_format`` carries the schema to
+        providers that honor ``json_schema`` mode, and a copy of the schema
+        plus the literal word "JSON" goes into the user message for providers
+        that downgrade to ``json_object`` mode. OpenRouter's
+        ``require_parameters`` filter checks parameter *names* (does the
+        provider accept ``response_format``?) not subtypes (does it honor
+        ``json_schema``?) — Alibaba/Qwen passes the filter and then strips
+        the schema, so the in-prompt copy is the actual safety net.
         """
-        system_blocks: list[dict[str, Any]] = [{"type": "text", "text": system}]
-        if cache_system:
-            system_blocks[0]["cache_control"] = {"type": "ephemeral"}
-
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "system": system_blocks,
-            "messages": [{"role": "user", "content": user}],
-        }
-        if thinking:
-            kwargs["thinking"] = {"type": "adaptive"}
-
-        if max_tokens > 16000:
-            with self.client.messages.stream(**kwargs) as stream:
-                message = stream.get_final_message()
-        else:
-            message = self.client.messages.create(**kwargs)
-
-        return "".join(block.text for block in message.content if block.type == "text")
+        schema_text = json.dumps(output_type.model_json_schema(), indent=2)
+        augmented_user = (
+            f"{user}\n\n"
+            f"Respond with a single JSON object matching this schema:\n"
+            f"```json\n{schema_text}\n```"
+        )
+        response = self.client.beta.chat.completions.parse(
+            model=self.model,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": augmented_user},
+            ],
+            response_format=output_type,
+            extra_body=self._extra_body,
+        )
+        parsed = response.choices[0].message.parsed
+        if parsed is None:
+            raise RuntimeError(
+                f"LLM did not produce a parseable {output_type.__name__}; "
+                f"finish_reason={response.choices[0].finish_reason}"
+            )
+        return parsed

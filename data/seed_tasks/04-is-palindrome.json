@@ -1,0 +1,30 @@
+{
+  "task": {
+    "id": "seed/04-is-palindrome",
+    "prompt": "Write a function `is_palindrome(s)` that returns True if the string is a palindrome.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Return True iff s reads the same forwards and backwards, with no preprocessing.",
+    "inputs": [
+      {"name": "s", "type": "str", "description": "the string to test", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "bool", "description": "True iff s == s reversed", "constraints": []}
+    ],
+    "preconditions": ["s is a str"],
+    "postconditions": ["result is True iff s == s[::-1]"],
+    "invariants": [],
+    "edge_cases": [
+      "empty string returns True",
+      "single character returns True",
+      "case-sensitive: 'Aa' is NOT a palindrome",
+      "whitespace and punctuation are significant: 'a b a' is a palindrome but 'a, b, a' is not",
+      "no Unicode normalization is performed"
+    ],
+    "acceptance_criteria": [
+      "result == (s == s[::-1]) for all str inputs",
+      "no lowercasing, normalization, or filtering of characters"
+    ]
+  }
+}

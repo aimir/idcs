@@ -1,0 +1,28 @@
+{
+  "task": {
+    "id": "seed/02-reverse",
+    "prompt": "Write a function `reverse(s)` that returns the input string reversed.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Return the input string with its code points in reverse order.",
+    "inputs": [
+      {"name": "s", "type": "str", "description": "the string to reverse", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "str", "description": "code-point reversal of s", "constraints": ["len(result) == len(s)"]}
+    ],
+    "preconditions": ["s is a str"],
+    "postconditions": ["result == s[::-1]"],
+    "invariants": [],
+    "edge_cases": [
+      "empty string returns empty string",
+      "Unicode strings: reverse code points, not graphemes (multi-codepoint emoji clusters may visually corrupt — this is acceptable)",
+      "preserves case and whitespace exactly"
+    ],
+    "acceptance_criteria": [
+      "result equals s[::-1] for any str input",
+      "no normalization, lowercasing, or whitespace stripping"
+    ]
+  }
+}
