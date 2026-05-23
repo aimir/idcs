@@ -25,9 +25,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import openai
+from pydantic import BaseModel, ValidationError
 
 log = logging.getLogger(__name__)
-from pydantic import BaseModel
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
@@ -148,14 +148,9 @@ class LLM:
     ) -> T:
         """Return a parsed pydantic instance of ``output_type``.
 
-        Belt and suspenders: ``response_format`` carries the schema to
-        providers that honor ``json_schema`` mode, and a copy of the schema
-        plus the literal word "JSON" goes into the user message for providers
-        that downgrade to ``json_object`` mode. OpenRouter's
-        ``require_parameters`` filter checks parameter *names* (does the
-        provider accept ``response_format``?) not subtypes (does it honor
-        ``json_schema``?) — Alibaba/Qwen passes the filter and then strips
-        the schema, so the in-prompt copy is the actual safety net.
+        Tries ``beta.chat.completions.parse`` first (works with Claude, GPT-4o).
+        Falls back to plain completion + manual JSON extraction for providers
+        like Qwen that echo back the schema instead of conforming to it.
         """
         schema_text = json.dumps(output_type.model_json_schema(), indent=2)
         augmented_user = (
@@ -163,22 +158,41 @@ class LLM:
             f"Respond with a single JSON object matching this schema:\n"
             f"```json\n{schema_text}\n```"
         )
-        response = _with_retry(
-            lambda: self.client.beta.chat.completions.parse(
-                model=self.model,
-                max_tokens=max_tokens,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": augmented_user},
-                ],
-                response_format=output_type,
-                extra_body=self._extra_body,
+        try:
+            response = _with_retry(
+                lambda: self.client.beta.chat.completions.parse(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": augmented_user},
+                    ],
+                    response_format=output_type,
+                    extra_body=self._extra_body,
+                )
             )
-        )
-        parsed = response.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError(
-                f"LLM did not produce a parseable {output_type.__name__}; "
-                f"finish_reason={response.choices[0].finish_reason}"
-            )
-        return parsed
+            parsed = response.choices[0].message.parsed
+            if parsed is not None:
+                return parsed
+        except (ValidationError, KeyError):
+            log.warning("Structured parse failed for %s, falling back to text extraction", output_type.__name__)
+
+        raw = self.complete(system, augmented_user, max_tokens=max_tokens)
+        return _parse_json_response(raw, output_type)
+
+
+def _parse_json_response(raw: str, output_type: type[T]) -> T:
+    """Extract JSON from raw LLM text (strips markdown fences) and validate."""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    # Handle case where model wraps JSON in other text — find first { to last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1:
+        text = text[start : end + 1]
+    return output_type.model_validate_json(text)
