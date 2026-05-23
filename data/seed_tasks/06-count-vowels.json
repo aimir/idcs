@@ -1,0 +1,33 @@
+{
+  "task": {
+    "id": "seed/06-count-vowels",
+    "prompt": "Write a function `count_vowels(s)` that returns the number of vowels in the string.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Count the occurrences of English vowels (a, e, i, o, u) in the input string, case-insensitively.",
+    "inputs": [
+      {"name": "s", "type": "str", "description": "the string to scan", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "int", "description": "number of vowel characters in s", "constraints": ["result >= 0", "result <= len(s)"]}
+    ],
+    "preconditions": ["s is a str"],
+    "postconditions": ["result equals the count of characters in s that match {a, e, i, o, u, A, E, I, O, U}"],
+    "invariants": [],
+    "edge_cases": [
+      "empty string returns 0",
+      "'y' is NOT counted as a vowel",
+      "case-insensitive: both 'a' and 'A' count",
+      "non-ASCII vowels (e.g., 'é', 'ü', 'å') are NOT counted",
+      "string with no vowels returns 0"
+    ],
+    "acceptance_criteria": [
+      "count_vowels('hello') returns 2",
+      "count_vowels('AEIOU') returns 5",
+      "count_vowels('') returns 0",
+      "count_vowels('rhythm') returns 0",
+      "count_vowels('café') returns 1"
+    ]
+  }
+}

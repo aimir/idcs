@@ -1,0 +1,36 @@
+{
+  "task": {
+    "id": "seed/08-is-anagram",
+    "prompt": "Write a function `is_anagram(a, b)` that returns True if two strings are anagrams of each other.",
+    "tests": []
+  },
+  "gold_spec": {
+    "goal": "Return True iff a and b contain the same characters with the same multiplicities, case-insensitively and ignoring whitespace.",
+    "inputs": [
+      {"name": "a", "type": "str", "description": "first string", "constraints": []},
+      {"name": "b", "type": "str", "description": "second string", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "bool", "description": "True iff a and b are anagrams under the normalization policy", "constraints": []}
+    ],
+    "preconditions": ["a and b are both str"],
+    "postconditions": [
+      "result is True iff sorted(a.lower().replace(' ', '')) == sorted(b.lower().replace(' ', ''))"
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "two empty strings are anagrams (both reduce to empty after normalization)",
+      "case is ignored: 'Listen' and 'Silent' are anagrams",
+      "whitespace is ignored: 'conversation' and 'voices rant on' are anagrams",
+      "punctuation IS significant — not stripped before comparison",
+      "non-ASCII characters compared case-insensitively where the language supports it; behavior on combining marks is unspecified"
+    ],
+    "acceptance_criteria": [
+      "is_anagram('listen', 'silent') returns True",
+      "is_anagram('Listen', 'Silent') returns True",
+      "is_anagram('conversation', 'voices rant on') returns True",
+      "is_anagram('hello', 'world') returns False",
+      "is_anagram('', '') returns True"
+    ]
+  }
+}
