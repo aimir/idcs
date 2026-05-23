@@ -2,7 +2,13 @@
   "task": {
     "id": "seed/07-flatten-list",
     "prompt": "Write a function `flatten(xs)` that flattens a nested list into a single flat list.",
-    "tests": []
+    "tests": [
+      {"id": "seed/07-flatten-list/t0", "code": "assert flatten([1, [2, 3], [4, [5, 6]]]) == [1, 2, 3, 4, 5, 6]"},
+      {"id": "seed/07-flatten-list/t1", "code": "assert flatten([]) == []"},
+      {"id": "seed/07-flatten-list/t2", "code": "assert flatten([1, (2, 3), 4]) == [1, (2, 3), 4]"},
+      {"id": "seed/07-flatten-list/t3", "code": "assert flatten(['ab', ['cd']]) == ['ab', 'cd']"},
+      {"id": "seed/07-flatten-list/t4", "code": "assert flatten([[[1]], 2]) == [1, 2]"}
+    ]
   },
   "gold_spec": {
     "goal": "Recursively flatten a list of arbitrary depth into a single-level list, preserving left-to-right depth-first order of leaves.",

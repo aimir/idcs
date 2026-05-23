@@ -2,7 +2,14 @@
   "task": {
     "id": "seed/06-count-vowels",
     "prompt": "Write a function `count_vowels(s)` that returns the number of vowels in the string.",
-    "tests": []
+    "tests": [
+      {"id": "seed/06-count-vowels/t0", "code": "assert count_vowels('hello') == 2"},
+      {"id": "seed/06-count-vowels/t1", "code": "assert count_vowels('AEIOU') == 5"},
+      {"id": "seed/06-count-vowels/t2", "code": "assert count_vowels('') == 0"},
+      {"id": "seed/06-count-vowels/t3", "code": "assert count_vowels('rhythm') == 0"},
+      {"id": "seed/06-count-vowels/t4", "code": "assert count_vowels('xyz') == 0"},
+      {"id": "seed/06-count-vowels/t5", "code": "assert count_vowels('cafe') == 2"}
+    ]
   },
   "gold_spec": {
     "goal": "Count the occurrences of English vowels (a, e, i, o, u) in the input string, case-insensitively.",

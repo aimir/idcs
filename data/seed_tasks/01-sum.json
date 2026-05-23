@@ -2,7 +2,13 @@
   "task": {
     "id": "seed/01-sum",
     "prompt": "Write a function `add(a, b)` that returns the sum of two integers.",
-    "tests": []
+    "tests": [
+      {"id": "seed/01-sum/t0", "code": "assert add(2, 3) == 5"},
+      {"id": "seed/01-sum/t1", "code": "assert add(-1, 1) == 0"},
+      {"id": "seed/01-sum/t2", "code": "assert add(0, 0) == 0"},
+      {"id": "seed/01-sum/t3", "code": "assert add(-5, -7) == -12"},
+      {"id": "seed/01-sum/t4", "code": "assert add(10**18, 10**18) == 2 * 10**18"}
+    ]
   },
   "gold_spec": {
     "goal": "Return the integer sum of two integer arguments.",

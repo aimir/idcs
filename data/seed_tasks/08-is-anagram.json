@@ -2,7 +2,14 @@
   "task": {
     "id": "seed/08-is-anagram",
     "prompt": "Write a function `is_anagram(a, b)` that returns True if two strings are anagrams of each other.",
-    "tests": []
+    "tests": [
+      {"id": "seed/08-is-anagram/t0", "code": "assert is_anagram('listen', 'silent') == True"},
+      {"id": "seed/08-is-anagram/t1", "code": "assert is_anagram('Listen', 'Silent') == True"},
+      {"id": "seed/08-is-anagram/t2", "code": "assert is_anagram('conversation', 'voices rant on') == True"},
+      {"id": "seed/08-is-anagram/t3", "code": "assert is_anagram('hello', 'world') == False"},
+      {"id": "seed/08-is-anagram/t4", "code": "assert is_anagram('', '') == True"},
+      {"id": "seed/08-is-anagram/t5", "code": "assert is_anagram('abc', 'cba') == True"}
+    ]
   },
   "gold_spec": {
     "goal": "Return True iff a and b contain the same characters with the same multiplicities, case-insensitively and ignoring whitespace.",
