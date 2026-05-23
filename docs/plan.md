@@ -46,9 +46,15 @@ fix the spec format before adding any optimization machinery.
 ## Phase 3 — Rewards + telemetry (2 days)
 
 - `rewards.py` implementing R_G, R_D.
-- `attribution.py` for counterfactual type-2 credit.
+- `attribution.py` for counterfactual type-2 credit (replaces the
+  Phase 2 naïve clarification-rate proxy in `scripts/clarification_rate.py`
+  with a per-question Δ derived from a re-run that drops that question).
 - `telemetry.py` emitting JSONL of every turn.
 - `scripts/inspect.py` for browsing runs.
+- Counter on `LLM.complete_typed`'s structured-output fallback. The
+  current silent fallback (text extraction when `.parse()` returns
+  `None`) is intentional for provider quirks like Qwen but can mask
+  real provider bugs — we want a visible metric for how often it fires.
 
 **Exit criterion**: reward values move sensibly on hand-edited prompt
 variants (e.g. a deliberately bad G prompt scores lower).
