@@ -25,12 +25,13 @@ def load_mbpp_plus() -> list[Task]:
 
 def _to_task(task_id: str, item: dict[str, Any]) -> Task:
     prompt = str(item.get("prompt", ""))
+    entry_point = item.get("entry_point") or None
     assertion_block = str(item.get("assertion", ""))
     tests = [
         Test(id=f"{task_id}/t{i}", code=line)
         for i, line in enumerate(_split_assertions(assertion_block))
     ]
-    return Task(id=task_id, prompt=prompt, tests=tests)
+    return Task(id=task_id, prompt=prompt, entry_point=entry_point, tests=tests)
 
 
 def _split_assertions(text: str) -> list[str]:
