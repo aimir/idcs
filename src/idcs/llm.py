@@ -17,6 +17,10 @@ import json
 import os
 from typing import Any, Protocol, TypeVar
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import openai
 from pydantic import BaseModel
 
