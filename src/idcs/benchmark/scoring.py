@@ -34,12 +34,27 @@ from idcs.schemas import Task
 
 @lru_cache(maxsize=1)
 def _apply_macos_compat() -> None:
-    """No-op off macOS; otherwise patch EvalPlus to survive RLIMIT_AS."""
+    """No-op off macOS; otherwise patch EvalPlus to survive RLIMIT_AS.
+
+    EvalPlus's worker (``evalplus.eval.unsafe_execute``) calls
+    ``reliability_guard`` via a name imported into its module namespace
+    at *import* time:
+
+        from evalplus.eval.utils import reliability_guard
+
+    That creates two bindings — ``evalplus.eval.utils.reliability_guard``
+    (canonical) and ``evalplus.eval.reliability_guard`` (the one the
+    worker actually looks up). Patching only the canonical name leaves
+    the worker calling the original. We patch **both**, then force
+    multiprocessing to ``fork`` so the patched module state propagates
+    to the worker process.
+    """
     if sys.platform != "darwin":
         return
     with contextlib.suppress(RuntimeError, ValueError):
         multiprocessing.set_start_method("fork", force=True)
     try:
+        import evalplus.eval as _ee
         from evalplus.eval import utils as _eu
 
         _original = _eu.reliability_guard
@@ -50,6 +65,7 @@ def _apply_macos_compat() -> None:
             _original(maximum_memory_bytes=None)
 
         _eu.reliability_guard = _macos_safe
+        _ee.reliability_guard = _macos_safe  # the binding unsafe_execute resolves
     except ImportError:
         pass
 
