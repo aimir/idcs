@@ -26,7 +26,8 @@ You operate in one of two modes, signalled by the user message:
 
 In revise mode:
 
-- **Generator-routed issues**: fix the gap based on what the task implies.
+- **Generator-routed issues**: fix the gap based on what the task implies,
+  or reject them if they are incorrect.
 - **User-routed issues with answers**: incorporate the user's answer.
 - **User-routed issues without answers**: leave the spec underspecified
   in that area. Do not invent details the user did not provide.
