@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import sys
 import time
 from pathlib import Path
@@ -73,9 +74,13 @@ def run_baseline_b(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--tasks", nargs="*", default=None)
+    parser.add_argument("--limit", type=int, default=None, help="max tasks to run")
+    parser.add_argument("--offset", type=int, default=0, help="skip first N tasks")
+    parser.add_argument("--sample", type=int, default=None, help="random sample of N tasks")
+    parser.add_argument("--min-tests", type=int, default=0, help="only tasks with >= N assertions")
+    parser.add_argument("--tasks", nargs="*", default=None, help="specific task IDs")
     parser.add_argument("--max-turns", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=42, help="random seed for --sample")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -83,8 +88,16 @@ def main() -> int:
         logging.getLogger().setLevel(logging.DEBUG)
 
     tasks = load_mbpp_plus()
+    total_available = len(tasks)
     if args.tasks:
         tasks = [t for t in tasks if t.id in args.tasks]
+    if args.min_tests:
+        tasks = [t for t in tasks if len(t.tests) >= args.min_tests]
+    if args.offset:
+        tasks = tasks[args.offset:]
+    if args.sample:
+        rng = random.Random(args.seed)
+        tasks = rng.sample(tasks, min(args.sample, len(tasks)))
     if args.limit:
         tasks = tasks[: args.limit]
 
@@ -92,8 +105,15 @@ def main() -> int:
 
     print(f"\n{'='*50}")
     print(f"Model:      {llm.model}")
-    print(f"Tasks:      {len(tasks)}")
+    print(f"Tasks:      {len(tasks)} (of {total_available} available)")
+    if args.offset:
+        print(f"Offset:     {args.offset}")
+    if args.min_tests:
+        print(f"Min tests:  {args.min_tests}")
+    if args.sample:
+        print(f"Sample:     {args.sample} (seed={args.seed})")
     print(f"Max turns:  {args.max_turns}")
+    print(f"Task IDs:   {tasks[0].id} .. {tasks[-1].id}")
     print(f"{'='*50}\n")
 
     coder = Coder(llm)
