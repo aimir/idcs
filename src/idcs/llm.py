@@ -18,14 +18,17 @@ import logging
 import os
 import random
 import time
-from typing import Any, Callable, Protocol, TypeVar
-
-from dotenv import load_dotenv
-
-load_dotenv()
+from collections.abc import Callable
+from typing import Any, Protocol, TypeVar
 
 import openai
+from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
+
+# Load .env so OPENROUTER_API_KEY / IDCS_MODEL are available to LLM().
+# Safe to call here — openai's SDK reads env vars at client instantiation,
+# not at import time.
+load_dotenv()
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +42,7 @@ def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_re
     for attempt in range(max_retries + 1):
         try:
             return fn()
-        except openai.RateLimitError as e:
+        except openai.RateLimitError:
             if attempt == max_retries:
                 raise
             delay = (2**attempt) + random.uniform(0, 1)
@@ -49,7 +52,10 @@ def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_re
             if e.status_code < 500 or attempt == max_retries:
                 raise
             delay = (2**attempt) + random.uniform(0, 1)
-            log.warning("%d server error, retry %d/%d in %.1fs", e.status_code, attempt + 1, max_retries, delay)
+            log.warning(
+                "%d server error, retry %d/%d in %.1fs",
+                e.status_code, attempt + 1, max_retries, delay,
+            )
             time.sleep(delay)
     raise AssertionError("unreachable")
 
@@ -175,7 +181,10 @@ class LLM:
             if parsed is not None:
                 return parsed
         except (ValidationError, KeyError):
-            log.warning("Structured parse failed for %s, falling back to text extraction", output_type.__name__)
+            log.warning(
+                "Structured parse failed for %s, falling back to text extraction",
+                output_type.__name__,
+            )
 
         raw = self.complete(system, augmented_user, max_tokens=max_tokens)
         return _parse_json_response(raw, output_type)

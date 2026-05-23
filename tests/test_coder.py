@@ -25,7 +25,8 @@ def _simple_spec() -> Spec:
 
 class TestExtractCode:
     def test_plain_code_unchanged(self):
-        assert _extract_code("def add(a, b):\n    return a + b") == "def add(a, b):\n    return a + b"
+        code = "def add(a, b):\n    return a + b"
+        assert _extract_code(code) == code
 
     def test_strips_python_fences(self):
         raw = "```python\ndef add(a, b):\n    return a + b\n```"

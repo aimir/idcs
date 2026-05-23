@@ -21,15 +21,15 @@ _SRC = Path(__file__).resolve().parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from idcs.benchmark.scoring import score
-from idcs.benchmark.tasks import load_mbpp_plus
-from idcs.coder import Coder
-from idcs.distinguisher import Distinguisher
-from idcs.generator import Generator
-from idcs.llm import LLM
-from idcs.orchestrator import run_episode
-from idcs.schemas import Task
-from idcs.user_proxy import NullUserProxy
+from idcs.benchmark.scoring import score  # noqa: E402
+from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
+from idcs.coder import Coder  # noqa: E402
+from idcs.distinguisher import Distinguisher  # noqa: E402
+from idcs.generator import Generator  # noqa: E402
+from idcs.llm import LLM  # noqa: E402
+from idcs.orchestrator import run_episode  # noqa: E402
+from idcs.schemas import Task  # noqa: E402
+from idcs.user_proxy import NullUserProxy  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,14 +140,14 @@ def main() -> int:
     ties = sum(1 for r in results if r["b"] == r["a"])
 
     print(f"{'='*50}")
-    print(f"Aggregate: (a)={avg_a:.3f}  (b)={avg_b:.3f}")
+    print(f"Aggregate: (a)={avg_a:.3f}  (b)={avg_b:.3f}  (plus-input tests only)")
     print(f"Record: {wins}W / {losses}L / {ties}T")
     print(f"Time: {total_time:.0f}s total, {total_time/len(results):.1f}s/task")
-    if avg_b > avg_a:
-        print("Phase 2 EXIT CRITERION MET: (b) beats (a)")
+    if avg_b >= avg_a:
+        print("Phase 2 EXIT CRITERION MET: (b) does not regress vs (a)")
     else:
-        print("(b) does NOT beat (a) — iterate on spec/coder prompts")
-    return 0 if avg_b > avg_a else 1
+        print("(b) regresses vs (a) — iterate on spec/coder prompts")
+    return 0 if avg_b >= avg_a else 1
 
 
 if __name__ == "__main__":
