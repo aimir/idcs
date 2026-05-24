@@ -4,12 +4,15 @@ Reads ``metrics.jsonl`` (per-task and per-epoch metrics) and
 ``traces.jsonl`` (full episode records) plus the ``config.json`` snapshot
 that lives alongside them.
 
+(Named ``inspect_run.py`` — not ``inspect.py`` — to avoid shadowing the
+stdlib ``inspect`` module when Python adds ``scripts/`` to ``sys.path``.)
+
 Usage:
-    python scripts/inspect.py <run_dir>                     # summary
-    python scripts/inspect.py <run_dir> --epoch 3            # rows from epoch 3
-    python scripts/inspect.py <run_dir> --task Mbpp/42       # rows for one task
-    python scripts/inspect.py <run_dir> --trace Mbpp/42 \\
-        --prompt-hash abc123ef                               # one full trace
+    python scripts/inspect_run.py <run_dir>                    # summary
+    python scripts/inspect_run.py <run_dir> --epoch 3           # rows from epoch 3
+    python scripts/inspect_run.py <run_dir> --task Mbpp/42      # rows for one task
+    python scripts/inspect_run.py <run_dir> --trace Mbpp/42 \\
+        --prompt-hash abc123ef                                  # one full trace
 """
 
 from __future__ import annotations
