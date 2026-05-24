@@ -21,6 +21,11 @@ class RewardWeights:
     # useful. design.md: "penalize on the cap, not the average".
     max_type2_per_episode: int = 5
     excess_type2_penalty: float = 1.0
+    # When the direct/no-spec baseline for the task is known, penalize
+    # spec-guided candidates that lose hidden tests relative to that baseline.
+    # This keeps coevolution from trading one rescued task for broad partial
+    # regressions elsewhere.
+    regression_penalty_weight: float = 2.0
 
 
 def compute_reward_breakdown(
@@ -49,8 +54,13 @@ def compute_reward_breakdown(
     type1_fixed_count = _count_type1_fixed(trace)
     clarification_count = sum(len(turn.user_answers) for turn in trace.turns)
     useful_clarification_rate = 0.0
+    benchmark_delta = 0.0
+    regression_penalty = 0.0
     if baseline_score is not None and clarification_count > 0:
         useful_clarification_rate = (benchmark_score - baseline_score) / clarification_count
+    if baseline_score is not None:
+        benchmark_delta = benchmark_score - baseline_score
+        regression_penalty = max(0.0, -benchmark_delta)
 
     spec_complexity_penalty = compute_spec_complexity_penalty(
         trace.final_spec, task_prompt, weights.min_spec_ratio
@@ -60,6 +70,7 @@ def compute_reward_breakdown(
         weights.alpha * benchmark_score
         - weights.beta * type1_count
         - weights.gamma * spec_complexity_penalty
+        - weights.regression_penalty_weight * regression_penalty
     )
     excess_type2 = max(0, type2_count - weights.max_type2_per_episode)
     r_distinguisher = (
@@ -68,6 +79,7 @@ def compute_reward_breakdown(
         + weights.delta * useful_clarification_rate
         - weights.epsilon * type2_dismissed_count
         - weights.excess_type2_penalty * excess_type2
+        - weights.regression_penalty_weight * regression_penalty
     )
 
     return RewardBreakdown(
@@ -78,6 +90,8 @@ def compute_reward_breakdown(
         type2_dismissed_count=type2_dismissed_count,
         useful_clarification_rate=useful_clarification_rate,
         spec_complexity_penalty=spec_complexity_penalty,
+        benchmark_delta=benchmark_delta,
+        regression_penalty=regression_penalty,
         r_generator=r_generator,
         r_distinguisher=r_distinguisher,
     )
