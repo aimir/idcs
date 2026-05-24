@@ -162,12 +162,9 @@ def _run_grader(
     except Exception as e:
         return [False] * len(inputs), f"harness format failed: {e}"
 
-    with tempfile.NamedTemporaryFile(
-        suffix=".py", mode="w", delete=False, encoding="utf-8"
-    ) as f:
-        f.write(harness)
-        script_path = Path(f.name)
-    try:
+    with tempfile.TemporaryDirectory(prefix="idcs-grader-") as tmpdir:
+        script_path = Path(tmpdir) / "harness.py"
+        script_path.write_text(harness, encoding="utf-8")
         try:
             proc = subprocess.run(
                 [sys.executable, str(script_path)],
@@ -178,8 +175,6 @@ def _run_grader(
             )
         except subprocess.TimeoutExpired:
             return [False] * len(inputs), "subprocess timeout"
-    finally:
-        script_path.unlink(missing_ok=True)
 
     idx = proc.stdout.rfind(SCORE_MARKER)
     if idx == -1:
