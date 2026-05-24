@@ -104,5 +104,14 @@ def _count_type1_fixed(trace: Trace) -> int:
     return fixed
 
 
-def _issue_key(issue: Issue) -> tuple[str, str, str, str]:
-    return (issue.kind, issue.route, issue.location, issue.description)
+def _issue_key(issue: Issue) -> tuple[str, str]:
+    """Key for matching the *same underlying issue* across consecutive turns.
+
+    Uses only ``(kind, location)``. ``description`` is LLM-generated free
+    text and may legitimately vary when D re-flags the same gap — including
+    that in the key would let G score a "fix" just by D rewording. ``route``
+    is excluded too: if D moves a type-1 to a type-2 next turn (same gap,
+    different routing decision), the gap is still present and shouldn't
+    count as fixed.
+    """
+    return (issue.kind, issue.location)
