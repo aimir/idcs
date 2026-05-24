@@ -51,7 +51,15 @@ def coevolve(
     weights: RewardWeights | None = None,
     config: CoevolveConfig | None = None,
     baseline_scores: dict[str, float] | None = None,
+    val_tasks: list[Task] | None = None,
 ) -> CoevolveResult:
+    """Run the alternating G / D evolution.
+
+    ``tasks`` is the *training* set. ``val_tasks`` is an optional held-out
+    set; when provided, the best-of-population G and D are evaluated on it
+    at the end of each epoch and the results land in ``metrics.jsonl`` as
+    ``val_*`` rows. Val is monitor-only — it does **not** drive selection.
+    """
     if not tasks:
         raise ValueError("tasks must be non-empty")
     weights = weights or RewardWeights()
@@ -63,7 +71,12 @@ def coevolve(
     # floor in useful_clarification_rate attribution. Computed once for the
     # whole training run; without this, baseline_score=None forces the
     # clarification-rate term to 0 on every candidate evaluation.
-    baselines = baseline_scores if baseline_scores is not None else _compute_baselines(tasks, llm)
+    baseline_targets = list(tasks) + list(val_tasks or [])
+    baselines = (
+        baseline_scores
+        if baseline_scores is not None
+        else _compute_baselines(baseline_targets, llm)
+    )
 
     mutator = Mutator(llm)
     generator_pop = _init_population(
@@ -105,7 +118,63 @@ def coevolve(
             baselines=baselines,
         )
 
+        if val_tasks and run_dir is not None:
+            val_metrics = _evaluate_on_val(
+                g_prompt=generator_pop.best().prompt,
+                d_prompt=distinguisher_pop.best().prompt,
+                val_tasks=val_tasks,
+                llm=llm,
+                user_factory=user_factory,
+                weights=weights,
+                max_turns=config.max_turns,
+                baselines=baselines,
+            )
+            write_metrics(
+                run_dir,
+                {"epoch": epoch, "split": "val", **val_metrics},
+            )
+
     return CoevolveResult(generator=generator_pop, distinguisher=distinguisher_pop, run_dir=run_dir)
+
+
+def _evaluate_on_val(
+    *,
+    g_prompt: str,
+    d_prompt: str,
+    val_tasks: list[Task],
+    llm: LLMClient,
+    user_factory: Callable[[Task], UserProxy],
+    weights: RewardWeights,
+    max_turns: int,
+    baselines: dict[str, float],
+) -> dict[str, float]:
+    """Best-G vs best-D on the val split. Monitor-only; never feeds selection."""
+    coder = Coder(llm)
+    g = Generator(llm, prompt=g_prompt)
+    d = Distinguisher(llm, prompt=d_prompt)
+    benchmarks: list[float] = []
+    g_rewards: list[float] = []
+    d_rewards: list[float] = []
+    for task in val_tasks:
+        user = user_factory(task)
+        trace = run_episode(task, g, d, user, max_turns=max_turns)
+        benchmark = _score_trace(task, trace, coder)
+        breakdown = compute_reward_breakdown(
+            trace,
+            task.prompt,
+            benchmark_score=benchmark,
+            weights=weights,
+            baseline_score=baselines.get(task.id),
+        )
+        benchmarks.append(benchmark)
+        g_rewards.append(breakdown.r_generator)
+        d_rewards.append(breakdown.r_distinguisher)
+    return {
+        "val_avg_benchmark": mean(benchmarks) if benchmarks else 0.0,
+        "val_avg_r_generator": mean(g_rewards) if g_rewards else 0.0,
+        "val_avg_r_distinguisher": mean(d_rewards) if d_rewards else 0.0,
+        "val_n_tasks": len(val_tasks),
+    }
 
 
 def _compute_baselines(tasks: list[Task], llm: LLMClient) -> dict[str, float]:

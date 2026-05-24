@@ -35,6 +35,12 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--task-sample", type=int, default=None)
     parser.add_argument("--no-telemetry", action="store_true")
+    parser.add_argument(
+        "--val-fraction",
+        type=float,
+        default=0.0,
+        help="Hold out this fraction of tasks for monitor-only val eval per epoch (e.g. 0.2).",
+    )
     args = parser.parse_args()
 
     llm = LLM()
@@ -68,6 +74,16 @@ def main() -> int:
         print("No tasks selected.", file=sys.stderr)
         return 1
 
+    val_tasks: list = []
+    if 0.0 < args.val_fraction < 1.0 and len(tasks) >= 5:
+        rng_split = random.Random(args.seed)
+        shuffled = list(tasks)
+        rng_split.shuffle(shuffled)
+        split_idx = max(1, int(round(len(shuffled) * args.val_fraction)))
+        val_tasks = shuffled[:split_idx]
+        tasks = shuffled[split_idx:]
+        print(f"Held out {len(val_tasks)} val tasks; training on {len(tasks)}.")
+
     config = CoevolveConfig(
         population_size=args.pop_size,
         elite_size=args.elite_size,
@@ -85,6 +101,7 @@ def main() -> int:
         distinguisher_prompt=distinguisher_prompt,
         user_factory=user_factory,
         config=config,
+        val_tasks=val_tasks or None,
     )
 
     print(f"Run dir: {result.run_dir}" if result.run_dir else "Telemetry disabled")
