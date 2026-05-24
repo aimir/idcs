@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
+import json
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -77,6 +79,17 @@ def coevolve(
         if baseline_scores is not None
         else _compute_baselines(baseline_targets, llm)
     )
+
+    if run_dir is not None:
+        _write_config_snapshot(
+            run_dir,
+            llm=llm,
+            config=config,
+            weights=weights,
+            train_tasks=tasks,
+            val_tasks=val_tasks,
+            baselines=baselines,
+        )
 
     mutator = Mutator(llm)
     generator_pop = _init_population(
@@ -175,6 +188,40 @@ def _evaluate_on_val(
         "val_avg_r_distinguisher": mean(d_rewards) if d_rewards else 0.0,
         "val_n_tasks": len(val_tasks),
     }
+
+
+def _write_config_snapshot(
+    run_dir: Path,
+    *,
+    llm: LLMClient,
+    config: CoevolveConfig,
+    weights: RewardWeights,
+    train_tasks: list[Task],
+    val_tasks: list[Task] | None,
+    baselines: dict[str, float],
+) -> None:
+    """Pin the experiment's inputs in run_dir/config.json.
+
+    Future-you reading this run wants to know: which model, which weights,
+    which tasks, which baselines. Without this snapshot, traces and metrics
+    are uninterpretable a week later.
+    """
+    snapshot = {
+        "model": getattr(llm, "model", None),
+        "weights": dataclasses.asdict(weights),
+        "config": dataclasses.asdict(config),
+        "train_task_ids": [t.id for t in train_tasks],
+        "val_task_ids": [t.id for t in (val_tasks or [])],
+        "baselines": baselines,
+    }
+    (run_dir / "config.json").write_text(
+        json.dumps(snapshot, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _hash_prompt(prompt: str) -> str:
+    return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
 
 
 def _compute_baselines(tasks: list[Task], llm: LLMClient) -> dict[str, float]:
@@ -302,6 +349,8 @@ def _evaluate_candidate(
         user = user_factory(task)
 
         trace = run_episode(task, generator, distinguisher, user, max_turns=config.max_turns)
+        trace.generator_prompt_hash = _hash_prompt(generator_prompt)
+        trace.distinguisher_prompt_hash = _hash_prompt(distinguisher_prompt)
         benchmark = _score_trace(task, trace, coder)
         trace.benchmark_score = benchmark
         breakdown = compute_reward_breakdown(
@@ -406,12 +455,11 @@ def _trace_metrics(
     reward: float,
     benchmark_score: float,
 ) -> dict[str, object]:
-    prompt_hash = hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
     return {
         "epoch": epoch,
         "role": role,
         "task_id": task_id,
-        "prompt_hash": prompt_hash,
+        "prompt_hash": _hash_prompt(prompt),
         "reward": reward,
         "benchmark_score": benchmark_score,
     }

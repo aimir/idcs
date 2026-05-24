@@ -109,6 +109,11 @@ class Trace(BaseModel):
     final_spec: Spec | None = None
     benchmark_score: float = 0.0
     rewards: RewardBreakdown = PydField(default_factory=RewardBreakdown)
+    # Prompt fingerprints for cross-referencing traces ↔ candidates. Set by
+    # the optimizer when a candidate is evaluated; harmless on cold-start
+    # traces that don't come from a coevolution run.
+    generator_prompt_hash: str | None = None
+    distinguisher_prompt_hash: str | None = None
 
 
 class IssueList(BaseModel):
