@@ -161,8 +161,12 @@ class LLM:
         schema_text = json.dumps(output_type.model_json_schema(), indent=2)
         augmented_user = (
             f"{user}\n\n"
-            f"Respond with a single JSON object matching this schema:\n"
-            f"```json\n{schema_text}\n```"
+            f"Respond with a single JSON object that **conforms to** the schema "
+            f"below. You must produce an INSTANCE — concrete values for each "
+            f"field — not the schema definition itself. Do not include `$schema`, "
+            f"`type: object`, `properties`, `required`, or `$defs` keys in your "
+            f"response.\n\n"
+            f"Schema:\n```json\n{schema_text}\n```"
         )
         try:
             response = _with_retry(
@@ -204,4 +208,35 @@ def _parse_json_response(raw: str, output_type: type[T]) -> T:
     end = text.rfind("}")
     if start != -1 and end != -1:
         text = text[start : end + 1]
-    return output_type.model_validate_json(text)
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Could not parse model output as JSON ({e}). "
+            f"Raw response (first 500 chars):\n{raw[:500]}"
+        ) from e
+
+    # Some providers (notably Qwen via Alibaba) ignore the "produce an
+    # instance" instruction and echo the schema we sent them. Catch that
+    # explicitly so the error is actionable rather than a confusing pydantic
+    # "field required" message about the schema metadata.
+    if isinstance(data, dict) and _looks_like_schema_echo(data):
+        raise RuntimeError(
+            f"Model returned a JSON schema instead of a {output_type.__name__} "
+            f"instance. This is a known failure mode of some providers — "
+            f"set IDCS_MODEL to a model with reliable structured-output "
+            f"support (e.g. anthropic/claude-sonnet-4.5, openai/gpt-4o, "
+            f"google/gemini-2.5-pro) and retry."
+        )
+
+    return output_type.model_validate(data)
+
+
+def _looks_like_schema_echo(data: dict[str, Any]) -> bool:
+    """Heuristic: did the provider echo back the JSON schema verbatim?"""
+    if "$schema" in data:
+        return True
+    # Bare schema shape: ``type: object`` + ``properties`` at top level
+    return data.get("type") == "object" and "properties" in data
+
