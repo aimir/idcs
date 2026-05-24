@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import random
 
 from pydantic import BaseModel
 
-from idcs.optimizer.coevolve import CoevolveConfig, coevolve
+from idcs.optimizer.coevolve import CoevolveConfig, _evaluate_candidate, coevolve
+from idcs.optimizer.population import Population, PromptCandidate
 from idcs.rewards import RewardWeights
 from idcs.schemas import Issue, IssueList, Spec, Task, Test
 from tests.fakes import FakeLLM, FakeUserProxy
@@ -186,3 +188,54 @@ def test_coevolve_runs_with_fake_llms_end_to_end(tmp_path, monkeypatch) -> None:
     assert distinguisher_snapshot[0]["rank"] == 1
     assert distinguisher_snapshot[0]["reward"] == 1.0
     assert distinguisher_snapshot[0]["prompt"]
+
+
+def test_candidate_evaluation_records_failure_without_crashing(tmp_path) -> None:
+    task = _task()
+
+    def failing_typed_responder(
+        system: str,
+        user: str,
+        output_type: type[BaseModel],
+    ) -> BaseModel:
+        del system, user, output_type
+        raise RuntimeError("malformed structured output")
+
+    llm = FakeLLM(typed_responder=failing_typed_responder)
+    candidate = PromptCandidate(prompt="generator prompt")
+
+    result = _evaluate_candidate(
+        role="generator",
+        candidate=candidate,
+        opponent_population=Population([PromptCandidate(prompt="distinguisher prompt")]),
+        tasks=[task],
+        llm=llm,
+        user_factory=lambda task: FakeUserProxy(),
+        weights=RewardWeights(),
+        config=CoevolveConfig(max_turns=1),
+        rng=random.Random(7),
+        run_dir=tmp_path,
+        epoch=1,
+        baselines={},
+    )
+
+    assert result.reward == -1.0
+    assert result.breakdowns[0].benchmark_score == 0.0
+
+    metrics = [
+        json.loads(line)
+        for line in (tmp_path / "metrics.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert metrics == [
+        {
+            "epoch": 1,
+            "role": "generator",
+            "task_id": "seed/coevolve-add",
+            "prompt_hash": "11167aa98036",
+            "reward": -1.0,
+            "benchmark_score": 0.0,
+            "llm_structured_fallback_count": 0,
+            "error_type": "RuntimeError",
+            "error_message": "malformed structured output",
+        }
+    ]

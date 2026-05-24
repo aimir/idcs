@@ -240,6 +240,16 @@ class LLM:
         fallback_reason: str | None = None
         calls_before_parse = self.calls_made
         try:
+            if self.backend == CODEX_BACKEND:
+                raw = self.complete(system, augmented_user, max_tokens=max_tokens)
+                return self._parse_typed_with_repair(
+                    system,
+                    augmented_user,
+                    raw,
+                    output_type,
+                    max_tokens=max_tokens,
+                )
+
             if self.client is None:
                 raise RuntimeError("OpenAI-compatible backend was not initialized.")
             client = self.client
@@ -267,7 +277,31 @@ class LLM:
         self._record_structured_fallback(output_type.__name__, fallback_reason or "unknown")
 
         raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-        return _parse_json_response(raw, output_type)
+        return self._parse_typed_with_repair(
+            system,
+            augmented_user,
+            raw,
+            output_type,
+            max_tokens=max_tokens,
+        )
+
+    def _parse_typed_with_repair(
+        self,
+        system: str,
+        original_user: str,
+        raw: str,
+        output_type: type[T],
+        *,
+        max_tokens: int,
+    ) -> T:
+        """Parse typed JSON, retrying once when a text backend emits invalid JSON."""
+        try:
+            return _parse_json_response(raw, output_type)
+        except RuntimeError as exc:
+            self._record_structured_fallback(output_type.__name__, "json_repair")
+            repair_user = _json_repair_prompt(original_user, raw, str(exc), output_type)
+            repaired = self.complete(system, repair_user, max_tokens=max_tokens)
+            return _parse_json_response(repaired, output_type)
 
     def _record_structured_fallback(self, output_type_name: str, reason: str) -> None:
         self.structured_fallback_count += 1
@@ -337,6 +371,7 @@ class LLM:
                 "exec",
                 "--model",
                 self.model,
+                *_codex_config_args(),
                 "--sandbox",
                 "read-only",
                 "--ephemeral",
@@ -378,6 +413,39 @@ def _float_env(name: str, default: float) -> float:
         return float(value)
     except ValueError as exc:
         raise ValueError(f"{name} must be a number.") from exc
+
+
+def _codex_config_args() -> list[str]:
+    """Render optional Codex CLI config overrides for local benchmark calls."""
+    args: list[str] = []
+    config_env = {
+        "service_tier": os.environ.get("IDCS_CODEX_SERVICE_TIER"),
+        "model_reasoning_effort": os.environ.get("IDCS_CODEX_REASONING_EFFORT"),
+    }
+    for key, value in config_env.items():
+        if value:
+            args.extend(["-c", f"{key}={json.dumps(value)}"])
+    return args
+
+
+def _json_repair_prompt(
+    original_user: str,
+    raw: str,
+    error: str,
+    output_type: type[BaseModel],
+) -> str:
+    return (
+        "Your previous response could not be parsed as the requested JSON object.\n"
+        f"Output type: {output_type.__name__}\n"
+        f"Parse error:\n{error[:1000]}\n\n"
+        "Original request:\n"
+        f"{original_user}\n\n"
+        "Previous response:\n"
+        "```text\n"
+        f"{raw[:4000]}\n"
+        "```\n\n"
+        "Return only one valid JSON object. Do not include markdown fences or commentary."
+    )
 
 
 def _parse_json_response(raw: str, output_type: type[T]) -> T:
