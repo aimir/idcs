@@ -127,8 +127,11 @@ def _init_population(
 ) -> Population:
     members = [PromptCandidate(prompt=base_prompt)]
     if size > 1:
-        feedback = f"Seed mutations for {role} prompt diversity."
-        mutations = mutator.mutate(base_prompt, feedback, count=size - 1)
+        feedback = (
+            "Seed mutations for diversity. No evaluation data yet — produce "
+            "variants that differ in structure or emphasis, not paraphrases."
+        )
+        mutations = mutator.mutate(base_prompt, feedback, role=role, count=size - 1)
         rng.shuffle(mutations)
         for prompt in mutations:
             members.append(PromptCandidate(prompt=prompt))
@@ -190,7 +193,7 @@ def _evolve_population(
     while len(new_members) < config.population_size:
         parent = rng.choice(elites or evaluated_population.members)
         feedback = _summarize_feedback(parent, role)
-        mutations = mutator.mutate(parent.prompt, feedback, count=1)
+        mutations = mutator.mutate(parent.prompt, feedback, role=role, count=1)
         if mutations:
             new_members.append(PromptCandidate(prompt=mutations[0]))
         else:
@@ -284,15 +287,44 @@ def _sample_tasks(tasks: list[Task], sample_size: int | None, rng: random.Random
 
 
 def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
+    """Role-specific feedback string fed into Mutator.mutate(...)."""
     if not candidate.breakdowns:
-        return f"Improve {role} prompt to raise benchmark score and reduce issues."
+        return (
+            f"No evaluation data yet for this {role} prompt. "
+            "Produce a variant that differs in structure or emphasis."
+        )
+    n = len(candidate.breakdowns)
     avg_benchmark = mean(b.benchmark_score for b in candidate.breakdowns)
     avg_type1 = mean(b.type1_count for b in candidate.breakdowns)
     avg_type2 = mean(b.type2_count for b in candidate.breakdowns)
+    avg_type1_fixed = mean(b.type1_fixed_count for b in candidate.breakdowns)
+    avg_type2_dismissed = mean(b.type2_dismissed_count for b in candidate.breakdowns)
+    avg_useful_rate = mean(b.useful_clarification_rate for b in candidate.breakdowns)
+    avg_spec_penalty = mean(b.spec_complexity_penalty for b in candidate.breakdowns)
+
+    if role == "generator":
+        return (
+            f"Generator results over {n} tasks. "
+            f"avg benchmark={avg_benchmark:.3f} (higher is better). "
+            f"avg type-1 issues D raised against your specs={avg_type1:.2f} "
+            f"(lower is better — these are gaps you should have caught). "
+            f"avg spec complexity penalty={avg_spec_penalty:.3f} "
+            f"(avoid empty / thin specs). Improve by producing specs "
+            f"concrete enough that D has fewer gaps to flag, without "
+            f"dropping benchmark score."
+        )
     return (
-        f"Role={role}. Avg benchmark={avg_benchmark:.3f}. "
-        f"Avg type1={avg_type1:.2f}, avg type2={avg_type2:.2f}. "
-        "Improve benchmark score and reduce avoidable issues."
+        f"Distinguisher results over {n} tasks. "
+        f"avg benchmark={avg_benchmark:.3f}. "
+        f"avg type-1 issues you raised={avg_type1:.2f}; "
+        f"of those, avg actually fixed next turn={avg_type1_fixed:.2f} "
+        f"(this is your accepted-reject rate — higher is better). "
+        f"avg type-2 questions={avg_type2:.2f}; "
+        f"avg dismissed by user={avg_type2_dismissed:.2f} "
+        f"(lower is better). useful clarification rate={avg_useful_rate:.3f} "
+        f"(positive means your questions improved the spec). "
+        f"Improve by raising issues G will accept and asking only "
+        f"genuinely useful user-routed questions (cap is 5/episode)."
     )
 
 
