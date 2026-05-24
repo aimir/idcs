@@ -21,7 +21,7 @@ import random
 from collections.abc import Callable
 
 from idcs._prompts import load_prompt  # noqa: E402
-from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
+from idcs.benchmark.tasks import load_benchmark_tasks  # noqa: E402
 from idcs.llm import LLM, BudgetExceededError  # noqa: E402
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
@@ -36,7 +36,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--benchmark", choices=["mbpp", "seed"], default="mbpp")
+    parser.add_argument("--benchmark", choices=["mbpp", "hard", "seed"], default="mbpp")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--sample", type=int, default=None)
@@ -88,7 +88,7 @@ def main() -> int:
         user_factory = seed_user_factory
 
     else:
-        tasks = load_mbpp_plus()
+        tasks = load_benchmark_tasks("hard" if args.benchmark == "hard" else "mbpp")
 
         def null_user_factory(task: Task) -> UserProxy:
             return NullUserProxy()

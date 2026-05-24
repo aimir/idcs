@@ -5,6 +5,7 @@ Baseline (b): task.prompt → spec (via orchestrator) → code
 
 Usage:
     uv run python scripts/baseline.py --limit 10
+    uv run python scripts/baseline.py --dataset hard --limit 3
     uv run python scripts/baseline.py --tasks Mbpp/2 Mbpp/3
 """
 
@@ -29,7 +30,7 @@ import time
 from typing import Any
 
 from idcs.benchmark.scoring import score  # noqa: E402
-from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
+from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
@@ -81,6 +82,12 @@ def run_baseline_b(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset",
+        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        default=MBPP_PLUS_DATASET,
+        help="benchmark slice to run",
+    )
     parser.add_argument("--limit", type=int, default=None, help="max tasks to run")
     parser.add_argument("--offset", type=int, default=0, help="skip first N tasks")
     parser.add_argument("--sample", type=int, default=None, help="random sample of N tasks")
@@ -94,7 +101,7 @@ def main() -> int:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    tasks = load_mbpp_plus()
+    tasks = load_benchmark_tasks(args.dataset)
     total_available = len(tasks)
     if args.tasks:
         tasks = [t for t in tasks if t.id in args.tasks]
@@ -107,10 +114,14 @@ def main() -> int:
         tasks = rng.sample(tasks, min(args.sample, len(tasks)))
     if args.limit:
         tasks = tasks[: args.limit]
+    if not tasks:
+        print("No tasks selected.", file=sys.stderr)
+        return 1
 
     llm = LLM()
 
     print(f"\n{'='*50}")
+    print(f"Dataset:    {args.dataset}")
     print(f"Model:      {llm.model}")
     print(f"Tasks:      {len(tasks)} (of {total_available} available)")
     if args.offset:
