@@ -1,0 +1,49 @@
+{
+  "task": {
+    "id": "vuln/12-clamp-contradiction",
+    "prompt": "Write a function `clamp(value, low, high)` that restricts a number to be within the range [low, high].",
+    "tests": [
+      {"id": "vuln/12/t0", "code": "assert clamp(5, 1, 10) == 5"},
+      {"id": "vuln/12/t1", "code": "assert clamp(-3, 0, 100) == 0"},
+      {"id": "vuln/12/t2", "code": "assert clamp(200, 0, 100) == 100"},
+      {"id": "vuln/12/t3", "code": "assert clamp(0, 0, 0) == 0"},
+      {"id": "vuln/12/t4", "code": "assert clamp(5, 5, 5) == 5"},
+      {"id": "vuln/12/t5", "code": "try:\n    clamp(5, 10, 1)\n    assert False, 'should have raised'\nexcept ValueError:\n    pass"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Clamp value to the range [low, high]. Raise ValueError if low > high.",
+    "inputs": [
+      {"name": "value", "type": "int | float", "description": "the number to clamp", "constraints": []},
+      {"name": "low", "type": "int | float", "description": "lower bound (inclusive)", "constraints": []},
+      {"name": "high", "type": "int | float", "description": "upper bound (inclusive)", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "int | float", "description": "clamped value", "constraints": []}
+    ],
+    "preconditions": [
+      "low <= high, otherwise ValueError is raised"
+    ],
+    "postconditions": [
+      "low <= result <= high",
+      "if low <= value <= high then result == value",
+      "if value < low then result == low",
+      "if value > high then result == high"
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "low == high — any value clamps to that single point",
+      "value exactly equals low or high — returned unchanged",
+      "low > high — must raise ValueError"
+    ],
+    "acceptance_criteria": [
+      "returns value clamped to [low, high]",
+      "raises ValueError when low > high"
+    ]
+  },
+  "known_weakness": {
+    "type": "contradiction",
+    "description": "The task says 'restricts to range [low, high]' but does not say what happens when low > high. A naive spec might produce postconditions like 'low <= result <= high' which become contradictory (unsatisfiable) when low > high. The Distinguisher must flag that the spec needs to either add a precondition (low <= high) or specify error behavior for the inverted-range case.",
+    "naive_spec_gap": "no handling of the low > high case — postconditions become contradictory"
+  }
+}
