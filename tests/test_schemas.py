@@ -66,6 +66,30 @@ def test_issue_type_1_no_question() -> None:
     assert issue.suggested_question is None
 
 
+def test_issue_underconstraint() -> None:
+    issue = Issue(
+        kind="underconstraint",
+        route="generator",
+        location="postconditions",
+        description="Spec is satisfied by the trivial implementation `return 0`.",
+    )
+    restored = Issue.model_validate_json(issue.model_dump_json())
+    assert restored.kind == "underconstraint"
+
+
+def test_issue_implicit_assumption() -> None:
+    issue = Issue(
+        kind="implicit_assumption",
+        route="user",
+        location="preconditions",
+        description="Spec assumes input list has no duplicates.",
+        suggested_question="Can the input list contain duplicate elements?",
+    )
+    restored = Issue.model_validate_json(issue.model_dump_json())
+    assert restored.kind == "implicit_assumption"
+    assert restored.route == "user"
+
+
 def test_trace_round_trip() -> None:
     spec = Spec(goal="x")
     trace = Trace(
