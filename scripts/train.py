@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import random
 import sys
 from pathlib import Path
@@ -53,6 +54,12 @@ def main() -> int:
     args = parser.parse_args()
 
     llm = LLM(max_calls=args.max_llm_calls)
+    # Optional cheaper model for the mutator. Defaults to the main LLM if
+    # IDCS_MUTATOR_MODEL is unset.
+    mutator_model = os.environ.get("IDCS_MUTATOR_MODEL")
+    mutator_llm = LLM(model=mutator_model) if mutator_model else None
+    if mutator_llm is not None:
+        print(f"Using {mutator_llm.model} for prompt mutations (main: {llm.model}).")
     generator_prompt = load_prompt("generator_v0")
     distinguisher_prompt = load_prompt("distinguisher_v0")
 
@@ -112,6 +119,7 @@ def main() -> int:
             user_factory=user_factory,
             config=config,
             val_tasks=val_tasks or None,
+            mutator_llm=mutator_llm,
         )
     except BudgetExceededError as e:
         print(f"\nBUDGET EXHAUSTED: {e}", file=sys.stderr)

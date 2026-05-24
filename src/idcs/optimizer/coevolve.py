@@ -54,6 +54,7 @@ def coevolve(
     config: CoevolveConfig | None = None,
     baseline_scores: dict[str, float] | None = None,
     val_tasks: list[Task] | None = None,
+    mutator_llm: LLMClient | None = None,
 ) -> CoevolveResult:
     """Run the alternating G / D evolution.
 
@@ -91,7 +92,7 @@ def coevolve(
             baselines=baselines,
         )
 
-    mutator = Mutator(llm)
+    mutator = Mutator(mutator_llm if mutator_llm is not None else llm)
     generator_pop = _init_population(
         generator_prompt, config.population_size, mutator, "generator", rng
     )
