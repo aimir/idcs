@@ -97,6 +97,8 @@ class RewardBreakdown(BaseModel):
     type2_dismissed_count: int = 0
     useful_clarification_rate: float = 0.0
     spec_complexity_penalty: float = 0.0
+    benchmark_delta: float = 0.0
+    regression_penalty: float = 0.0
     r_generator: float = 0.0
     r_distinguisher: float = 0.0
 

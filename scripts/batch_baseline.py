@@ -55,6 +55,13 @@ class Counters:
     rescued: int = 0
     regressed: int = 0
     both_failed: int = 0
+    direct_pass_count: int = 0
+    direct_total_count: int = 0
+    spec_pass_count: int = 0
+    spec_total_count: int = 0
+    partial_improved: int = 0
+    partial_regressed: int = 0
+    partial_unchanged: int = 0
 
 
 def _select_tasks(args: argparse.Namespace) -> list[Task]:
@@ -182,6 +189,14 @@ def _record(
         else:
             direct_ok = bool(result["direct"]["passed_all"])
             spec_ok = bool(result["spec_guided"]["passed_all"])
+            direct_pass_count = int(result["direct"]["pass_count"])
+            direct_total_count = int(result["direct"]["total_count"])
+            spec_pass_count = int(result["spec_guided"]["pass_count"])
+            spec_total_count = int(result["spec_guided"]["total_count"])
+            counters.direct_pass_count += direct_pass_count
+            counters.direct_total_count += direct_total_count
+            counters.spec_pass_count += spec_pass_count
+            counters.spec_total_count += spec_total_count
             if not direct_ok:
                 counters.direct_failed += 1
             if not spec_ok:
@@ -192,6 +207,23 @@ def _record(
                 counters.regressed += 1
             if not direct_ok and not spec_ok:
                 counters.both_failed += 1
+            if spec_pass_count > direct_pass_count:
+                counters.partial_improved += 1
+            elif spec_pass_count < direct_pass_count:
+                counters.partial_regressed += 1
+            else:
+                counters.partial_unchanged += 1
+
+        direct_pass_rate = (
+            counters.direct_pass_count / counters.direct_total_count
+            if counters.direct_total_count
+            else 0.0
+        )
+        spec_pass_rate = (
+            counters.spec_pass_count / counters.spec_total_count
+            if counters.spec_total_count
+            else 0.0
+        )
 
         with results_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(result, sort_keys=True) + "\n")
@@ -199,6 +231,11 @@ def _record(
         summary = {
             **meta,
             **asdict(counters),
+            "direct_pass_rate": direct_pass_rate,
+            "spec_pass_rate": spec_pass_rate,
+            "spec_minus_direct_pass_count": (
+                counters.spec_pass_count - counters.direct_pass_count
+            ),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
         summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -208,6 +245,7 @@ def _record(
             f"spec_failed={counters.spec_failed} "
             f"rescued={counters.rescued} "
             f"regressed={counters.regressed} "
+            f"partial_delta={counters.spec_pass_count - counters.direct_pass_count} "
             f"errors={counters.errors} "
             f"task={result.get('task_id')} "
             f"attempts={result.get('attempts', 'ERR')}",

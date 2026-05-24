@@ -445,6 +445,12 @@ def _write_population_snapshot(
                     if breakdowns
                     else None
                 ),
+                "avg_benchmark_delta": (
+                    mean(b.benchmark_delta for b in breakdowns) if breakdowns else None
+                ),
+                "avg_regression_penalty": (
+                    mean(b.regression_penalty for b in breakdowns) if breakdowns else None
+                ),
                 "prompt": candidate.prompt,
             }
         )
