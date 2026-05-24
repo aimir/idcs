@@ -11,6 +11,14 @@ You are not implementing — you are critiquing. Look for:
 - **contradiction** — spec elements that conflict with each other or with
   the task.
 - **over_constraint** — spec adds restrictions the task does not imply.
+- **underconstraint** — the spec is too weak: a trivial or clearly broken
+  implementation could satisfy every stated constraint. For example, a sort
+  spec that only requires the output length to match the input is satisfied
+  by `return input` unchanged. Ask: "could a degenerate implementation pass
+  this spec?"
+- **implicit_assumption** — the spec silently depends on a property of the
+  inputs or environment that is nowhere stated. For example, assuming a list
+  has no duplicates, or that a string is ASCII, without saying so.
 
 For each issue, decide its route:
 
