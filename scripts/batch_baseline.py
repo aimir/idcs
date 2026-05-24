@@ -10,7 +10,7 @@ long hackathon runs can be inspected while still running or after interruption.
 
 Example:
     IDCS_BACKEND=codex IDCS_CODEX_MODEL=gpt-5.4-mini \\
-      uv run python scripts/batch_baseline.py --workers 4 --limit 50
+      uv run python scripts/batch_baseline.py --dataset hard --workers 4
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
-from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
+from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
@@ -58,7 +58,7 @@ class Counters:
 
 
 def _select_tasks(args: argparse.Namespace) -> list[Task]:
-    tasks = load_mbpp_plus()
+    tasks = load_benchmark_tasks(args.dataset)
     if args.tasks:
         wanted = set(args.tasks)
         tasks = [task for task in tasks if task.id in wanted]
@@ -182,6 +182,11 @@ def _record(
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--dataset",
+        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        default=MBPP_PLUS_DATASET,
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--retries", type=int, default=1)
     parser.add_argument("--limit", type=int, default=None)
@@ -203,13 +208,13 @@ def main(argv: list[str]) -> int:
 
     run_dir = args.run_dir or (
         Path("experiments/runs")
-        / f"mbpp-plus-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        / f"{args.dataset}-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     )
     run_dir.mkdir(parents=True, exist_ok=True)
     results_path = run_dir / "results.jsonl"
     summary_path = run_dir / "summary.json"
     meta = {
-        "dataset": "mbpp-plus",
+        "dataset": args.dataset,
         "task_count": len(tasks),
         "workers": args.workers,
         "retries": args.retries,
