@@ -214,10 +214,14 @@ def _evaluate_candidate(
     baselines: dict[str, float],
 ) -> PromptCandidate:
     coder = Coder(llm)
+    # One opponent per candidate evaluation, not per task. Per-task sampling
+    # adds noise that's not meaningful — we want this candidate's average
+    # reward against *one* sampled opponent, not against a random walk through
+    # the opponent population.
+    opponent_prompt = _sample_opponent(opponent_population, rng)
     breakdowns: list[RewardBreakdown] = []
     rewards: list[float] = []
     for task in tasks:
-        opponent_prompt = _sample_opponent(opponent_population, rng)
         generator_prompt = candidate.prompt if role == "generator" else opponent_prompt
         distinguisher_prompt = candidate.prompt if role == "distinguisher" else opponent_prompt
 
