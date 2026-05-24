@@ -5,10 +5,15 @@ import random
 
 from pydantic import BaseModel
 
-from idcs.optimizer.coevolve import CoevolveConfig, _evaluate_candidate, coevolve
+from idcs.optimizer.coevolve import (
+    CoevolveConfig,
+    _evaluate_candidate,
+    _summarize_feedback,
+    coevolve,
+)
 from idcs.optimizer.population import Population, PromptCandidate
 from idcs.rewards import RewardWeights
-from idcs.schemas import Issue, IssueList, Spec, Task, Test
+from idcs.schemas import Issue, IssueList, RewardBreakdown, Spec, Task, Test
 from tests.fakes import FakeLLM, FakeUserProxy
 
 
@@ -239,3 +244,26 @@ def test_candidate_evaluation_records_failure_without_crashing(tmp_path) -> None
             "error_message": "malformed structured output",
         }
     ]
+
+
+def test_mutation_feedback_includes_delta_and_regression_terms() -> None:
+    candidate = PromptCandidate(
+        prompt="generator prompt",
+        breakdowns=[
+            RewardBreakdown(
+                benchmark_score=0.4,
+                benchmark_delta=0.2,
+                regression_penalty=0.0,
+            ),
+            RewardBreakdown(
+                benchmark_score=0.2,
+                benchmark_delta=-0.1,
+                regression_penalty=0.1,
+            ),
+        ],
+    )
+
+    feedback = _summarize_feedback(candidate, "generator")
+
+    assert "avg benchmark delta vs direct baseline=0.050" in feedback
+    assert "avg regression penalty=0.050" in feedback

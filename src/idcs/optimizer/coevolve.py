@@ -598,11 +598,16 @@ def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
     avg_type2_dismissed = mean(b.type2_dismissed_count for b in candidate.breakdowns)
     avg_useful_rate = mean(b.useful_clarification_rate for b in candidate.breakdowns)
     avg_spec_penalty = mean(b.spec_complexity_penalty for b in candidate.breakdowns)
+    avg_benchmark_delta = mean(b.benchmark_delta for b in candidate.breakdowns)
+    avg_regression_penalty = mean(b.regression_penalty for b in candidate.breakdowns)
 
     if role == "generator":
         return (
             f"Generator results over {n} tasks. "
             f"avg benchmark={avg_benchmark:.3f} (higher is better). "
+            f"avg benchmark delta vs direct baseline={avg_benchmark_delta:.3f}; "
+            f"avg regression penalty={avg_regression_penalty:.3f} "
+            f"(keep this at 0 by not losing hidden tests direct code passed). "
             f"avg type-1 issues D raised against your specs={avg_type1:.2f} "
             f"(lower is better — these are gaps you should have caught). "
             f"avg spec complexity penalty={avg_spec_penalty:.3f} "
@@ -613,6 +618,9 @@ def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
     return (
         f"Distinguisher results over {n} tasks. "
         f"avg benchmark={avg_benchmark:.3f}. "
+        f"avg benchmark delta vs direct baseline={avg_benchmark_delta:.3f}; "
+        f"avg regression penalty={avg_regression_penalty:.3f} "
+        f"(keep this at 0 by not pushing specs that lose hidden tests). "
         f"avg type-1 issues you raised={avg_type1:.2f}; "
         f"of those, avg actually fixed next turn={avg_type1_fixed:.2f} "
         f"(this is your accepted-reject rate — higher is better). "

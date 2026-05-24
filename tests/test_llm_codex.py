@@ -188,6 +188,40 @@ def test_codex_complete_typed_repairs_malformed_json(monkeypatch: pytest.MonkeyP
     assert "Return only one valid JSON object" in prompts[1]
 
 
+def test_codex_complete_typed_retries_json_repair_once_more(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+    outputs = ['{"value": "broken}', '{"value": "still broken}', '{"value": 7}']
+
+    def fake_run(
+        command: list[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        timeout: float,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del text, capture_output, timeout, check
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(outputs.pop(0), encoding="utf-8")
+        prompts.append(input)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+
+    llm = LLM()
+    result = llm.complete_typed("system", "give me json", Answer)
+
+    assert result == Answer(value=7)
+    assert llm.calls_made == 3
+    assert llm.structured_fallback_count == 2
+    assert len(prompts) == 3
+
+
 def test_codex_failure_omits_captured_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
