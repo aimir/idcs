@@ -50,6 +50,7 @@ def coevolve(
     user_factory: Callable[[Task], UserProxy],
     weights: RewardWeights | None = None,
     config: CoevolveConfig | None = None,
+    baseline_scores: dict[str, float] | None = None,
 ) -> CoevolveResult:
     if not tasks:
         raise ValueError("tasks must be non-empty")
@@ -57,6 +58,12 @@ def coevolve(
     config = config or CoevolveConfig()
     rng = random.Random(config.seed)
     run_dir = create_run_dir() if config.telemetry else None
+
+    # Per-task no-spec baseline (direct prompt → code → score). Used as the
+    # floor in useful_clarification_rate attribution. Computed once for the
+    # whole training run; without this, baseline_score=None forces the
+    # clarification-rate term to 0 on every candidate evaluation.
+    baselines = baseline_scores if baseline_scores is not None else _compute_baselines(tasks, llm)
 
     mutator = Mutator(llm)
     generator_pop = _init_population(
@@ -80,6 +87,7 @@ def coevolve(
             rng=rng,
             run_dir=run_dir,
             epoch=epoch,
+            baselines=baselines,
         )
         distinguisher_pop = _evolve_population(
             role="distinguisher",
@@ -94,9 +102,20 @@ def coevolve(
             rng=rng,
             run_dir=run_dir,
             epoch=epoch,
+            baselines=baselines,
         )
 
     return CoevolveResult(generator=generator_pop, distinguisher=distinguisher_pop, run_dir=run_dir)
+
+
+def _compute_baselines(tasks: list[Task], llm: LLMClient) -> dict[str, float]:
+    """Score ``coder.from_prompt`` once per task.
+
+    Cost: one LLM call + one ``score()`` per task. Linear in |tasks|, not
+    multiplied by population × epochs × roles.
+    """
+    coder = Coder(llm)
+    return {task.id: score(task, coder.from_prompt(task.prompt)) for task in tasks}
 
 
 def _init_population(
@@ -132,6 +151,7 @@ def _evolve_population(
     rng: random.Random,
     run_dir: Path | None,
     epoch: int,
+    baselines: dict[str, float],
 ) -> Population:
     evaluated = [
         _evaluate_candidate(
@@ -146,6 +166,7 @@ def _evolve_population(
             rng=rng,
             run_dir=run_dir,
             epoch=epoch,
+            baselines=baselines,
         )
         for candidate in population.members
     ]
@@ -190,6 +211,7 @@ def _evaluate_candidate(
     rng: random.Random,
     run_dir: Path | None,
     epoch: int,
+    baselines: dict[str, float],
 ) -> PromptCandidate:
     coder = Coder(llm)
     breakdowns: list[RewardBreakdown] = []
@@ -211,6 +233,7 @@ def _evaluate_candidate(
             task.prompt,
             benchmark_score=benchmark,
             weights=weights,
+            baseline_score=baselines.get(task.id),
         )
         trace.rewards = breakdown
 

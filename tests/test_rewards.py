@@ -130,6 +130,61 @@ def test_excess_type2_penalizes_distinguisher_not_generator() -> None:
     assert abs((b_no_cap.r_distinguisher - b_cap.r_distinguisher) - expected_delta) < 1e-9
 
 
+def test_useful_clarification_rate_is_zero_without_baseline() -> None:
+    """When baseline_score is None, the rate term contributes 0 (current proxy)."""
+    issue = Issue(
+        kind="ambiguity",
+        route="user",
+        location="goal",
+        description="?",
+        suggested_question="?",
+    )
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_spec(), issues=[issue], user_answers={"goal": "yes"})],
+        final_spec=_spec(),
+    )
+    weights = RewardWeights(min_spec_ratio=0.0)
+    breakdown = compute_reward_breakdown(trace, "p", benchmark_score=0.8, weights=weights)
+    assert breakdown.useful_clarification_rate == 0.0
+
+
+def test_useful_clarification_rate_uses_baseline_when_provided() -> None:
+    """With baseline_score set, the rate is (benchmark - baseline) / clarifications."""
+    issue = Issue(
+        kind="ambiguity",
+        route="user",
+        location="goal",
+        description="?",
+        suggested_question="?",
+    )
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_spec(), issues=[issue], user_answers={"goal": "yes"})],
+        final_spec=_spec(),
+    )
+    weights = RewardWeights(min_spec_ratio=0.0)
+    breakdown = compute_reward_breakdown(
+        trace, "p", benchmark_score=0.8, weights=weights, baseline_score=0.5
+    )
+    # 1 clarification answered, Δ = 0.3 → rate = 0.3
+    assert abs(breakdown.useful_clarification_rate - 0.3) < 1e-9
+
+
+def test_useful_clarification_rate_zero_when_no_clarifications() -> None:
+    """No user answers → division by zero avoided; rate stays 0 even with baseline."""
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_spec(), issues=[], user_answers={})],
+        final_spec=_spec(),
+    )
+    weights = RewardWeights(min_spec_ratio=0.0)
+    breakdown = compute_reward_breakdown(
+        trace, "p", benchmark_score=0.9, weights=weights, baseline_score=0.5
+    )
+    assert breakdown.useful_clarification_rate == 0.0
+
+
 def test_at_cap_no_excess_penalty() -> None:
     """Exactly at the cap, no excess penalty fires."""
     issues = [
