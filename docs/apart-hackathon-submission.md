@@ -130,26 +130,27 @@ flowchart TB
 
 **Figure 2.** Coevolution loop. The goal is to optimize the prompts that produce and critique specifications, not to manually bake in the final best prompt.
 
-We ran a local Codex-mini coevolution smoke test from clean seed prompts with:
+The final local coevolution run used:
 
 - benchmark: hard MBPP+ slice
-- epochs: 3
-- population size: 3
-- elite size: 1
+- epochs: 5
+- population size: 4
+- elite size: 2
 - max turns: 2
-- task sample size: 2
-- seed: 42
+- task sample size: 3
+- seed: 2026052402
 - model: `gpt-5.4-mini`
 
-This is intentionally a small run for iteration speed. It is not a final
-statistical result, but it verifies that prompt populations, selection,
-mutation, and epoch telemetry work end to end on the hard benchmark.
+This is still a small hackathon run, not a statistical benchmark. Its purpose
+is to verify that prompt populations, selection, mutation, epoch telemetry, and
+full-slice validation work end to end on tasks where exact edge behavior
+matters.
 
 ## 4. Results
 
 ### 4.1 MBPP+ Hard Slice
 
-The strongest verified result so far is the Codex-mini run on the five-task hard MBPP+ slice. Each task passed the original/base tests in both direct and spec-guided paths, but the hidden `plus_input` tests exposed failures.
+The first verified result is the Codex-mini run on the five-task hard MBPP+ slice. Each task passed the original/base tests in both direct and spec-guided paths, but the hidden `plus_input` tests exposed failures.
 
 **Table 1. Verified hard MBPP+ `plus_input` results.**
 
@@ -206,48 +207,48 @@ matters. It should not be used as the main performance claim.
 
 ### 4.4 Coevolution Results
 
-The first local Codex-mini coevolution smoke test used the hard MBPP+ slice,
-three epochs, population size 3, elite size 1, max turns 2, and two sampled
-tasks per role evaluation. The run started from the seed prompts rather than
-the manual diagnostic prompt.
+The project is not meant to start from a hand-written perfect prompt. We want
+the generator and distinguisher prompts to improve through coevolution. The
+latest local Codex run used the hard MBPP+ slice, five epochs, population size
+4, elite size 2, max turns 2, and three sampled tasks per candidate. It started
+from the seed prompts and completed with 587 LLM calls.
 
-**Table 3. Codex-mini coevolution smoke from seed prompts.**
+Run artifact:
 
-| Epoch | Best generator reward | Avg generator reward | Best distinguisher reward | Avg distinguisher reward | Notes |
-| ---: | ---: | ---: | ---: | ---: | --- |
-| 1 | 0.130 | 0.064 | 0.763 | 0.615 | D found variants that preserve the `Mbpp/92` rescue. |
-| 2 | 0.097 | 0.021 | 0.771 | 0.705 | D improved slightly; G regressed on this sampled task pair. |
-| 3 | 0.175 | 0.142 | 0.280 | 0.214 | G recovered; D dropped on a different sampled pair (`Mbpp/639`, `Mbpp/459`). |
+`experiments/runs/20260524T185513Z`
 
-The result is noisy because the run samples only two tasks per role evaluation.
-The useful signal is operational: the coevolution machinery runs from seed
-prompts, records prompt populations and per-epoch metrics, and can surface
-better critic prompts. The next experiment should use a larger task sample and
-a stronger model to reduce sampling noise.
+**Table 3. Five-epoch coevolution run.**
 
-We then ran a second local Codex experiment with `gpt-5.4`, two epochs, the
-same population size, and three sampled tasks per role evaluation. This run
-also started from seed prompts and saved the best prompt text per epoch.
+| Epoch | Best generator reward | Avg generator reward | Best distinguisher reward | Avg distinguisher reward |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.179 | 0.113 | 0.283 | 0.218 |
+| 2 | 0.242 | 0.112 | 0.312 | 0.245 |
+| 3 | 0.254 | 0.091 | 0.311 | 0.291 |
+| 4 | 0.127 | 0.100 | 0.515 | 0.367 |
+| 5 | 0.342 | 0.143 | 0.442 | 0.376 |
 
-**Table 4. Codex `gpt-5.4` coevolution smoke from seed prompts.**
+The sampled run is noisy, but it is no longer just plumbing. Best generator
+reward rose above the earlier epochs, best distinguisher reward improved
+substantially, and `Mbpp/92` repeatedly reached a full hidden-test score inside
+evolved generator/distinguisher pairings.
 
-| Epoch | Best generator reward | Avg generator reward | Best distinguisher reward | Avg distinguisher reward | Notes |
-| ---: | ---: | ---: | ---: | ---: | --- |
-| 1 | 0.056 | 0.023 | 0.403 | 0.326 | Harder three-task sample; D receives positive reward for surfacing issues. |
-| 2 | 0.170 | 0.126 | 0.322 | 0.107 | G reward improves on the sampled set, but D reward drops on a different sample. |
+The important validation step was to evaluate prompt pairs that actually
+co-occurred during training on the full five-task hard slice.
 
-We validated the saved epoch-2 prompts on the full five-task hard slice. This
-did **not** improve hidden-test pass rate over the seed prompts:
+**Table 4. Full hard-slice validation of observed prompt pairs.**
 
-| Prompt set | Full-slice plus pass rate | Perfect tasks |
-| --- | ---: | ---: |
-| Seed prompts | 110/531 = 20.7% | 0/5 |
-| Epoch-2 coevolved prompts | 110/531 = 20.7% | 0/5 |
+| Prompt pair | Direct plus pass rate | Spec-guided plus pass rate | Perfect-task result | Notes |
+| --- | ---: | ---: | --- | --- |
+| Observed pair 1 | 110/531 = 20.7% | 163/531 = 30.7% | 1 rescue, 0 regressions | `Mbpp/92` improved from 32/101 to 101/101. |
+| Observed pair 3 | 110/531 = 20.7% | 162/531 = 30.5% | 1 rescue, 0 regressions | Same strict rescue pattern. |
+| Observed pair 2 | 110/531 = 20.7% | 101/531 = 19.0% | 0 rescues, 0 regressions | Did not transfer and worsened aggregate partial score. |
 
-This is a useful negative result. The optimizer can run, mutate prompts, select
-different candidates, and surface stronger critics on sampled tasks, but the
-current small run does not yet produce a prompt pair that generalizes across
-the full hard slice.
+This is a mixed but useful result. Coevolution produced prompt pairs that
+transfer to a real strict full-slice rescue, but selection is still imperfect.
+In particular, the best observed pair rescued `Mbpp/92` but worsened partial
+pass count on `Mbpp/597`. The lesson is that the optimizer is finding useful
+behavior, but future selection should optimize larger task samples or include a
+stronger anti-regression term.
 
 ## 5. Discussion and Limitations
 
@@ -270,11 +271,11 @@ The user-proxy component is currently a simplification. In real specification el
 
 The current generated-spec loop still fails on most hard tasks. The result should not be read as "IDCS solved specification elicitation." It should be read as "we found a benchmark where specifications matter, and the pipeline already has a measurable but incomplete advantage."
 
-OpenRouter-based Haiku runs were blocked locally by insufficient credits on the provided key. The current coevolution smoke uses the local Codex backend instead. A larger local Codex model produced sampled reward movement, but full-slice validation of the saved prompt pair did not beat the seed prompts.
+OpenRouter-based Haiku runs were blocked locally by insufficient credits on the provided key, so the final coevolution evidence uses the local Codex backend. The local run produced one transferable full-slice rescue, but it also showed that sampled reward can select prompt pairs with partial-score regressions. This makes anti-regression validation part of the core method, not a polish detail.
 
 ### Future Work
 
-The immediate next step is to rerun coevolution with full-slice or larger-sample evaluation in the selection loop, then evaluate the best evolved generator/distinguisher prompts on held-out tasks. The current sampled loop is too noisy to treat sampled reward as final benchmark improvement.
+The immediate next step is to rerun coevolution with full-slice or larger-sample evaluation in the selection loop, then evaluate the best evolved generator/distinguisher prompts on held-out tasks. The current sampled loop can find useful rescues, but it is too noisy to trust without full-slice anti-regression checks.
 
 After that, we should expand the hard benchmark slice from 5 tasks to 20-30 tasks, still selecting for underspecified semantics rather than algorithmic difficulty.
 
@@ -284,17 +285,20 @@ Finally, we should move toward security-shaped tasks: access-control decisions, 
 
 ## 6. Conclusion
 
-IDCS is a prototype for testing whether specification work can make AI-written code safer and more correct. The early evidence says yes in a limited but meaningful sense: on a hard MBPP+ slice selected for hidden edge semantics, direct generation failed all five tasks on perfect `plus_input` scoring, while the spec-guided path rescued one task and improved aggregate hidden-test pass rate from 20.7% to 33.7% without regressions.
+IDCS is a prototype for testing whether specification work can make AI-written code safer and more correct. The early evidence says yes in a limited but meaningful sense: on a hard MBPP+ slice selected for hidden edge semantics, direct generation failed all five tasks on perfect `plus_input` scoring, while the spec-guided path rescued one task and improved aggregate hidden-test pass rate from 20.7% to 33.7% without task-level regressions.
 
-The stronger lesson is about evaluation. If the benchmark is too easy, direct code generation looks solved and the value of specs disappears. Once the benchmark contains realistic underspecification, there is measurable headroom. The next step is to coevolve the generator and distinguisher prompts so that the system learns to discover those missing semantics automatically.
+The coevolution result makes the story more useful. Starting from seed prompts, the optimizer found observed generator/distinguisher pairs that transfer to the full hard slice, again rescuing `Mbpp/92` with no task-level regression. The result is not yet robust enough to claim broad improvement because some pairs worsen partial pass counts elsewhere. But it shows the intended loop working: prompts can be evolved, evaluated, inspected, and validated against hidden edge behavior.
+
+The stronger lesson is about evaluation. If the benchmark is too easy, direct code generation looks solved and the value of specs disappears. Once the benchmark contains realistic underspecification, there is measurable headroom. The next step is to make coevolution optimize that headroom more reliably, with larger task samples and stronger regression penalties.
 
 ## Code and Data
 
 - **Code repository:** https://github.com/aimir/idcs
 - **Main PR stack:** PR #10 (Phase 3 coevolution base), PR #11 (Codex backend and batch runner), PR #12 (hard MBPP+ benchmark slice), PR #13 (hardened gold-spec POC), PR #14 (coevolution observability and report)
 - **Datasets:** MBPP+ via EvalPlus; local `hard` slice over selected MBPP+ task IDs; separate local `hardened` POC dataset
-- **Verified run artifact:** `/private/tmp/idcs-hard-batch-current-mt3/summary.json` and `/private/tmp/idcs-hard-batch-current-mt3/results.jsonl`
-- **Coevolution run artifacts:** `/private/tmp/idcs-coevolve-seed/experiments/runs/20260524T170607Z/` and `/private/tmp/idcs-coevolve-seed/experiments/runs/20260524T175202Z/`
+- **Verified hard-slice baseline artifact:** `/private/tmp/idcs-hard-batch-current-mt3/summary.json` and `/private/tmp/idcs-hard-batch-current-mt3/results.jsonl`
+- **Final coevolution run artifact:** `experiments/runs/20260524T185513Z/`
+- **Full-slice observed-pair validations:** `/tmp/idcs-pair1-best-trace-full-hard/`, `/tmp/idcs-pair3-final-best-full-hard/`, and `/tmp/idcs-pair2-repeated-92-full-hard/`
 
 ## Author Contributions
 
@@ -342,38 +346,45 @@ uv run --no-project --with '.[dev]' python scripts/batch_baseline.py \
   --max-turns 3
 ```
 
-Codex-mini coevolution command from clean seed prompts:
+Recommended faster rerun command from clean seed prompts:
 
 ```bash
 IDCS_BACKEND=codex \
 IDCS_CODEX_MODEL=gpt-5.4-mini \
-IDCS_CODEX_TIMEOUT_S=180 \
+IDCS_CODEX_SERVICE_TIER=fast \
+IDCS_CODEX_REASONING_EFFORT=none \
+IDCS_CODEX_TIMEOUT_S=300 \
 uv run --no-project --with '.[dev]' python scripts/train.py \
   --benchmark hard \
-  --epochs 3 \
-  --pop-size 3 \
-  --elite-size 1 \
+  --epochs 5 \
+  --pop-size 4 \
+  --elite-size 2 \
   --max-turns 2 \
-  --task-sample 2 \
-  --seed 42 \
-  --max-llm-calls 220
+  --task-sample 3 \
+  --seed 2026052402 \
+  --max-llm-calls 650
 ```
 
-Stronger local Codex smoke with saved prompt candidates:
+The recorded five-epoch artifact was produced before the explicit fast-tier
+environment knob was added; the rerun command above preserves the same
+benchmark settings while asking the local Codex CLI for faster service.
+
+Full hard-slice validation of a saved observed prompt pair:
 
 ```bash
 IDCS_BACKEND=codex \
-IDCS_CODEX_MODEL=gpt-5.4 \
-IDCS_CODEX_TIMEOUT_S=240 \
-uv run --no-project --with '.[dev]' python scripts/train.py \
-  --benchmark hard \
-  --epochs 2 \
-  --pop-size 3 \
-  --elite-size 1 \
+IDCS_CODEX_MODEL=gpt-5.4-mini \
+IDCS_CODEX_SERVICE_TIER=fast \
+IDCS_CODEX_REASONING_EFFORT=none \
+IDCS_CODEX_TIMEOUT_S=300 \
+uv run --no-project --with '.[dev]' python scripts/batch_baseline.py \
+  --dataset hard \
+  --workers 2 \
+  --retries 0 \
   --max-turns 2 \
-  --task-sample 3 \
-  --seed 42 \
-  --max-llm-calls 240
+  --generator-prompt-file /tmp/idcs-observed-pairs/pair1_best_trace/generator.md \
+  --distinguisher-prompt-file /tmp/idcs-observed-pairs/pair1_best_trace/distinguisher.md \
+  --run-dir /tmp/idcs-pair1-best-trace-full-hard
 ```
 
 ### C. What Would Count as Stronger Evidence?
