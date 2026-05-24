@@ -97,6 +97,7 @@ class LLM:
         # the provider. ``None`` means no cap.
         self.max_calls = max_calls
         self.calls_made = 0
+        self.structured_fallback_count = 0
 
     def _check_budget(self) -> None:
         if self.max_calls is not None and self.calls_made >= self.max_calls:
@@ -197,6 +198,8 @@ class LLM:
             f"response.\n\n"
             f"Schema:\n```json\n{schema_text}\n```"
         )
+        fallback_reason: str | None = None
+        calls_before_parse = self.calls_made
         try:
             response = self._with_retry(
                 lambda: self.client.beta.chat.completions.parse(
@@ -213,14 +216,24 @@ class LLM:
             parsed = response.choices[0].message.parsed
             if parsed is not None:
                 return parsed
+            fallback_reason = "parsed_none"
         except (ValidationError, KeyError):
-            log.warning(
-                "Structured parse failed for %s, falling back to text extraction",
-                output_type.__name__,
-            )
+            if self.calls_made == calls_before_parse:
+                self.calls_made += 1
+            fallback_reason = "parse_exception"
+
+        self._record_structured_fallback(output_type.__name__, fallback_reason or "unknown")
 
         raw = self.complete(system, augmented_user, max_tokens=max_tokens)
         return _parse_json_response(raw, output_type)
+
+    def _record_structured_fallback(self, output_type_name: str, reason: str) -> None:
+        self.structured_fallback_count += 1
+        log.warning(
+            "Structured parse fallback for %s (%s); falling back to text extraction",
+            output_type_name,
+            reason,
+        )
 
 
 def _parse_json_response(raw: str, output_type: type[T]) -> T:
@@ -268,4 +281,3 @@ def _looks_like_schema_echo(data: dict[str, Any]) -> bool:
         return True
     # Bare schema shape: ``type: object`` + ``properties`` at top level
     return data.get("type") == "object" and "properties" in data
-

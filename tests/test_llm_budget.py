@@ -5,8 +5,13 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from idcs.llm import LLM, BudgetExceededError
+
+
+class Answer(BaseModel):
+    value: int
 
 
 def _fake_client(text: str = "ok") -> MagicMock:
@@ -52,3 +57,16 @@ def test_unset_budget_is_unlimited() -> None:
     for _ in range(20):
         llm.complete("sys", "u")
     assert llm.calls_made == 20  # nothing raised
+
+
+def test_complete_typed_counts_structured_fallback() -> None:
+    llm = LLM(api_key="dummy")
+    client = _fake_client(text='{"value": 7}')
+    client.beta.chat.completions.parse.side_effect = KeyError("bad structured response")
+    llm.client = client
+
+    result = llm.complete_typed("sys", "return JSON", Answer)
+
+    assert result == Answer(value=7)
+    assert llm.structured_fallback_count == 1
+    assert llm.calls_made == 2

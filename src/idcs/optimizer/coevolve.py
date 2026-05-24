@@ -257,6 +257,9 @@ def _evaluate_on_val(
         "val_avg_r_generator": mean(g_rewards) if g_rewards else 0.0,
         "val_avg_r_distinguisher": mean(d_rewards) if d_rewards else 0.0,
         "val_n_tasks": len(val_tasks),
+        "llm_structured_fallback_count": float(
+            getattr(llm, "structured_fallback_count", 0)
+        ),
     }
 
 
@@ -380,6 +383,11 @@ def _evolve_population(
                     "best_reward": best.reward,
                     "avg_reward": mean(evaluated_population.rewards()),
                     "population_size": len(evaluated_population.members),
+                    "llm_structured_fallback_count": getattr(
+                        llm,
+                        "structured_fallback_count",
+                        0,
+                    ),
                 },
             )
 
@@ -463,6 +471,7 @@ def _evaluate_candidate(
                     prompt=candidate.prompt,
                     reward=rewards[-1],
                     benchmark_score=benchmark,
+                    llm=llm,
                 ),
             )
 
@@ -542,8 +551,9 @@ def _trace_metrics(
     prompt: str,
     reward: float,
     benchmark_score: float,
+    llm: LLMClient | None = None,
 ) -> dict[str, object]:
-    return {
+    metrics: dict[str, object] = {
         "epoch": epoch,
         "role": role,
         "task_id": task_id,
@@ -551,3 +561,10 @@ def _trace_metrics(
         "reward": reward,
         "benchmark_score": benchmark_score,
     }
+    if llm is not None:
+        metrics["llm_structured_fallback_count"] = getattr(
+            llm,
+            "structured_fallback_count",
+            0,
+        )
+    return metrics

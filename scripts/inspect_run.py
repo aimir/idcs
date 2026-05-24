@@ -124,6 +124,16 @@ def _print_per_task_summary(metrics: list[dict[str, Any]]) -> None:
         )
 
 
+def _print_llm_telemetry(metrics: list[dict[str, Any]]) -> None:
+    counts = [
+        row["llm_structured_fallback_count"]
+        for row in metrics
+        if isinstance(row.get("llm_structured_fallback_count"), int | float)
+    ]
+    if counts:
+        print(f"\nstructured-output fallbacks: {max(counts):.0f}")
+
+
 def _filter_metrics(
     metrics: list[dict[str, Any]],
     *,
@@ -202,6 +212,7 @@ def main() -> int:
     _print_config(args.run_dir)
     print()
     _print_summary(metrics)
+    _print_llm_telemetry(metrics)
     _print_per_task_summary(metrics)
     print(f"\n{len(metrics)} metric rows, {len(traces)} traces.")
     return 0
