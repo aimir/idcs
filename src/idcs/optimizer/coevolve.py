@@ -390,6 +390,7 @@ def _evolve_population(
                     ),
                 },
             )
+        _write_population_snapshot(run_dir, epoch=epoch, role=role, population=evaluated_population)
 
     new_members = list(elites)
     while len(new_members) < config.population_size:
@@ -401,6 +402,54 @@ def _evolve_population(
         else:
             new_members.append(PromptCandidate(prompt=parent.prompt))
     return Population(members=new_members)
+
+
+def _write_population_snapshot(
+    run_dir: Path,
+    *,
+    epoch: int,
+    role: str,
+    population: Population,
+) -> None:
+    snapshots_dir = run_dir / "prompt_populations"
+    snapshots_dir.mkdir(exist_ok=True)
+    rows = []
+    ranked = sorted(
+        population.members,
+        key=lambda candidate: candidate.reward,
+        reverse=True,
+    )
+    for rank, candidate in enumerate(ranked, 1):
+        breakdowns = candidate.breakdowns or []
+        rows.append(
+            {
+                "epoch": epoch,
+                "role": role,
+                "rank": rank,
+                "prompt_hash": _hash_prompt(candidate.prompt),
+                "reward": candidate.reward,
+                "avg_benchmark": (
+                    mean(b.benchmark_score for b in breakdowns) if breakdowns else None
+                ),
+                "avg_type1_count": (
+                    mean(b.type1_count for b in breakdowns) if breakdowns else None
+                ),
+                "avg_type1_fixed_count": (
+                    mean(b.type1_fixed_count for b in breakdowns) if breakdowns else None
+                ),
+                "avg_type2_count": (
+                    mean(b.type2_count for b in breakdowns) if breakdowns else None
+                ),
+                "avg_useful_clarification_rate": (
+                    mean(b.useful_clarification_rate for b in breakdowns)
+                    if breakdowns
+                    else None
+                ),
+                "prompt": candidate.prompt,
+            }
+        )
+    path = snapshots_dir / f"{role}_epoch_{epoch:03d}.json"
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _evaluate_candidate(
