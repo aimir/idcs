@@ -86,12 +86,33 @@ def _score_payload(result: Any) -> dict[str, Any]:
     }
 
 
-def _run_one(task: Task, *, max_turns: int) -> dict[str, Any]:
+def _read_prompt_file(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _run_one(
+    task: Task,
+    *,
+    max_turns: int,
+    generator_prompt: str | None,
+    distinguisher_prompt: str | None,
+    coder_prompt: str | None,
+) -> dict[str, Any]:
     started = time.time()
     llm = LLM()
-    coder = Coder(llm)
-    generator = Generator(llm)
-    distinguisher = Distinguisher(llm)
+    coder = Coder(llm, prompt=coder_prompt) if coder_prompt is not None else Coder(llm)
+    generator = (
+        Generator(llm, prompt=generator_prompt)
+        if generator_prompt is not None
+        else Generator(llm)
+    )
+    distinguisher = (
+        Distinguisher(llm, prompt=distinguisher_prompt)
+        if distinguisher_prompt is not None
+        else Distinguisher(llm)
+    )
 
     direct_code = coder.from_prompt(task.prompt)
     direct_score = score_detailed(task, direct_code)
@@ -114,11 +135,25 @@ def _run_one(task: Task, *, max_turns: int) -> dict[str, Any]:
     }
 
 
-def _run_with_retries(task: Task, *, max_turns: int, retries: int) -> dict[str, Any]:
+def _run_with_retries(
+    task: Task,
+    *,
+    max_turns: int,
+    retries: int,
+    generator_prompt: str | None,
+    distinguisher_prompt: str | None,
+    coder_prompt: str | None,
+) -> dict[str, Any]:
     errors: list[dict[str, str | int]] = []
     for attempt in range(retries + 1):
         try:
-            result = _run_one(task, max_turns=max_turns)
+            result = _run_one(
+                task,
+                max_turns=max_turns,
+                generator_prompt=generator_prompt,
+                distinguisher_prompt=distinguisher_prompt,
+                coder_prompt=coder_prompt,
+            )
             result["attempts"] = attempt + 1
             return result
         except Exception as exc:  # noqa: BLE001 - batch runner should keep going.
@@ -199,6 +234,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--tasks", nargs="*", default=None)
     parser.add_argument("--run-dir", type=Path, default=None)
+    parser.add_argument("--generator-prompt-file", type=Path, default=None)
+    parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
+    parser.add_argument("--coder-prompt-file", type=Path, default=None)
     return parser.parse_args(argv)
 
 
@@ -208,6 +246,9 @@ def main(argv: list[str]) -> int:
     if not tasks:
         print("No tasks selected.", file=sys.stderr)
         return 1
+    generator_prompt = _read_prompt_file(args.generator_prompt_file)
+    distinguisher_prompt = _read_prompt_file(args.distinguisher_prompt_file)
+    coder_prompt = _read_prompt_file(args.coder_prompt_file)
 
     run_dir = args.run_dir or (
         Path("experiments/runs")
@@ -223,6 +264,13 @@ def main(argv: list[str]) -> int:
         "retries": args.retries,
         "max_turns": args.max_turns,
         "started_at": datetime.now().isoformat(timespec="seconds"),
+        "generator_prompt_file": str(args.generator_prompt_file)
+        if args.generator_prompt_file
+        else None,
+        "distinguisher_prompt_file": str(args.distinguisher_prompt_file)
+        if args.distinguisher_prompt_file
+        else None,
+        "coder_prompt_file": str(args.coder_prompt_file) if args.coder_prompt_file else None,
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
@@ -242,6 +290,9 @@ def main(argv: list[str]) -> int:
                 task,
                 max_turns=args.max_turns,
                 retries=args.retries,
+                generator_prompt=generator_prompt,
+                distinguisher_prompt=distinguisher_prompt,
+                coder_prompt=coder_prompt,
             ): task
             for task in tasks
         }

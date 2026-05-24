@@ -47,6 +47,8 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--task-sample", type=int, default=None)
     parser.add_argument("--no-telemetry", action="store_true")
+    parser.add_argument("--generator-prompt-file", type=Path, default=None)
+    parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
     parser.add_argument(
         "--val-fraction",
         type=float,
@@ -71,8 +73,16 @@ def main() -> int:
     mutator_llm = LLM(model=mutator_model) if mutator_model else None
     if mutator_llm is not None:
         print(f"Using {mutator_llm.model} for prompt mutations (main: {llm.model}).")
-    generator_prompt = load_prompt("generator_v0")
-    distinguisher_prompt = load_prompt("distinguisher_v0")
+    generator_prompt = (
+        args.generator_prompt_file.read_text(encoding="utf-8")
+        if args.generator_prompt_file
+        else load_prompt("generator_v0")
+    )
+    distinguisher_prompt = (
+        args.distinguisher_prompt_file.read_text(encoding="utf-8")
+        if args.distinguisher_prompt_file
+        else load_prompt("distinguisher_v0")
+    )
     tasks: list[Task]
     user_factory: Callable[[Task], UserProxy]
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from pydantic import BaseModel
 
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve
@@ -46,10 +48,13 @@ def _spec(goal: str) -> Spec:
     )
 
 
-def test_coevolve_runs_with_fake_llms_end_to_end() -> None:
+def test_coevolve_runs_with_fake_llms_end_to_end(tmp_path, monkeypatch) -> None:
     task = _task()
     users: list[FakeUserProxy] = []
     state = {"issue_pending": False, "mutation_index": 0}
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    monkeypatch.setattr("idcs.optimizer.coevolve.create_run_dir", lambda: run_dir)
 
     def text_responder(system: str, user: str) -> str:
         assert system
@@ -126,13 +131,13 @@ def test_coevolve_runs_with_fake_llms_end_to_end() -> None:
             elite_size=1,
             epochs=1,
             max_turns=2,
-            telemetry=False,
+            telemetry=True,
             seed=7,
         ),
         mutator_llm=mutator_llm,
     )
 
-    assert result.run_dir is None
+    assert result.run_dir == run_dir
     assert len(result.generator.members) == 2
     assert len(result.distinguisher.members) == 2
     assert result.generator.best().reward == 1.0
@@ -162,3 +167,22 @@ def test_coevolve_runs_with_fake_llms_end_to_end() -> None:
         "MutationBatch",
         "MutationBatch",
     ]
+
+    generator_snapshot = json.loads(
+        (run_dir / "prompt_populations" / "generator_epoch_001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    distinguisher_snapshot = json.loads(
+        (run_dir / "prompt_populations" / "distinguisher_epoch_001.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(generator_snapshot) == 2
+    assert len(distinguisher_snapshot) == 2
+    assert generator_snapshot[0]["rank"] == 1
+    assert generator_snapshot[0]["reward"] == 1.0
+    assert generator_snapshot[0]["prompt"]
+    assert distinguisher_snapshot[0]["rank"] == 1
+    assert distinguisher_snapshot[0]["reward"] == 1.0
+    assert distinguisher_snapshot[0]["prompt"]
