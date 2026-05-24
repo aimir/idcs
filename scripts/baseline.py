@@ -10,16 +10,23 @@ Usage:
 
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
+import sys
+from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) in sys.path:
+    sys.path.remove(str(_SCRIPT_DIR))
+_SRC = _SCRIPT_DIR.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
 import argparse
 import logging
 import random
-import sys
 import time
-from pathlib import Path
-
-_SRC = Path(__file__).resolve().parent.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+from typing import Any
 
 from idcs.benchmark.scoring import score  # noqa: E402
 from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
@@ -120,7 +127,7 @@ def main() -> int:
     generator = Generator(llm)
     distinguisher = Distinguisher(llm)
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     t_start = time.time()
     for i, task in enumerate(tasks, 1):
         print(f"[{i}/{len(tasks)}] {task.id}")

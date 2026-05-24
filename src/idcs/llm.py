@@ -17,8 +17,11 @@ import json
 import logging
 import os
 import random
+import subprocess
 import time
 from collections.abc import Callable
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Protocol, TypeVar
 
 import openai
@@ -34,6 +37,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_BACKEND = "openrouter"
+CODEX_BACKEND = "codex"
+DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
+DEFAULT_CODEX_TIMEOUT_S = 300.0
 MAX_RETRIES = 5
 
 
@@ -84,12 +91,30 @@ class LLM:
         base_url: str = DEFAULT_BASE_URL,
         require_parameters: bool = True,
         max_calls: int | None = None,
+        backend: str | None = None,
     ) -> None:
-        self.client = openai.OpenAI(
-            api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
-            base_url=base_url,
-        )
-        self.model = model or os.environ.get("IDCS_MODEL") or DEFAULT_MODEL
+        self.backend = (backend or os.environ.get("IDCS_BACKEND") or DEFAULT_BACKEND).lower()
+        if self.backend == CODEX_BACKEND:
+            self.client: openai.OpenAI | None = None
+            self.model = model or os.environ.get("IDCS_CODEX_MODEL") or DEFAULT_CODEX_MODEL
+            self.codex_timeout_s = _float_env("IDCS_CODEX_TIMEOUT_S", DEFAULT_CODEX_TIMEOUT_S)
+        elif self.backend in {"openrouter", "openai", "openai-compatible"}:
+            resolved_base_url = os.environ.get("IDCS_BASE_URL") or base_url
+            resolved_api_key = api_key or os.environ.get("IDCS_API_KEY")
+            if resolved_api_key is None:
+                resolved_api_key = os.environ.get("OPENROUTER_API_KEY")
+            if resolved_api_key is None and self.backend == "openai":
+                resolved_api_key = os.environ.get("OPENAI_API_KEY")
+            self.client = openai.OpenAI(
+                api_key=resolved_api_key,
+                base_url=resolved_base_url,
+            )
+            self.model = model or os.environ.get("IDCS_MODEL") or DEFAULT_MODEL
+            self.codex_timeout_s = DEFAULT_CODEX_TIMEOUT_S
+        else:
+            raise ValueError(
+                f"Unsupported IDCS_BACKEND={self.backend!r}; expected 'openrouter' or 'codex'."
+            )
         self.require_parameters = require_parameters
         # Budget tracking. Every API call attempt (success or failure)
         # increments ``calls_made``. Once it would exceed ``max_calls`` the
@@ -161,8 +186,14 @@ class LLM:
         max_tokens: int = 16000,
     ) -> str:
         """Return the assistant message's text content (empty string if absent)."""
+        if self.backend == CODEX_BACKEND:
+            return self._complete_with_codex(system, user, max_tokens=max_tokens)
+
+        if self.client is None:
+            raise RuntimeError("OpenAI-compatible backend was not initialized.")
+        client = self.client
         response = self._with_retry(
-            lambda: self.client.chat.completions.create(
+            lambda: client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 messages=[
@@ -201,8 +232,15 @@ class LLM:
         fallback_reason: str | None = None
         calls_before_parse = self.calls_made
         try:
+            if self.backend == CODEX_BACKEND:
+                raw = self.complete(system, augmented_user, max_tokens=max_tokens)
+                return _parse_json_response(raw, output_type)
+
+            if self.client is None:
+                raise RuntimeError("OpenAI-compatible backend was not initialized.")
+            client = self.client
             response = self._with_retry(
-                lambda: self.client.beta.chat.completions.parse(
+                lambda: client.beta.chat.completions.parse(
                     model=self.model,
                     max_tokens=max_tokens,
                     messages=[
@@ -234,6 +272,79 @@ class LLM:
             output_type_name,
             reason,
         )
+
+    def _complete_with_codex(self, system: str, user: str, *, max_tokens: int) -> str:
+        prompt = (
+            "You are serving as a stateless completion backend for a benchmark runner.\n"
+            "Do not edit files, run shell commands, or inspect the repository.\n"
+            "Return only the requested answer.\n\n"
+            f"SYSTEM:\n{system}\n\n"
+            f"USER:\n{user}\n\n"
+            f"Keep the response within roughly {max_tokens} tokens."
+        )
+        with TemporaryDirectory(prefix="idcs-codex-") as temp_dir:
+            output_path = Path(temp_dir) / "last-message.txt"
+            command = [
+                os.environ.get("IDCS_CODEX_EXECUTABLE", "codex"),
+                "exec",
+                "--model",
+                self.model,
+                "--sandbox",
+                "read-only",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--color",
+                "never",
+                "-C",
+                str(Path.cwd()),
+                "--output-last-message",
+                str(output_path),
+                "-",
+            ]
+            self._check_budget()
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=prompt,
+                    text=True,
+                    capture_output=True,
+                    timeout=self.codex_timeout_s,
+                    check=False,
+                )
+            except FileNotFoundError as exc:
+                self.calls_made += 1
+                raise RuntimeError(
+                    "Codex backend requested but the `codex` executable was not found."
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                self.calls_made += 1
+                raise RuntimeError(
+                    f"Codex backend timed out after {self.codex_timeout_s:g} seconds."
+                ) from exc
+            self.calls_made += 1
+
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    "Codex backend failed with exit code "
+                    f"{completed.returncode}; output omitted to avoid leaking prompts "
+                    "or credentials."
+                )
+
+            if output_path.exists():
+                output = output_path.read_text(encoding="utf-8").strip()
+                if output:
+                    return output
+            raise RuntimeError("Codex backend returned an empty final message.")
+
+
+def _float_env(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number.") from exc
 
 
 def _parse_json_response(raw: str, output_type: type[T]) -> T:

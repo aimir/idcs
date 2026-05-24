@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402, I001
+
+import sys
+from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) in sys.path:
+    sys.path.remove(str(_SCRIPT_DIR))
+_SRC = _SCRIPT_DIR.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
 import argparse
 import logging
 import os
 import random
-import sys
-from pathlib import Path
-
-_SRC = Path(__file__).resolve().parent.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+from collections.abc import Callable
 
 from idcs._prompts import load_prompt  # noqa: E402
 from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
 from idcs.llm import LLM, BudgetExceededError  # noqa: E402
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve  # noqa: E402
+from idcs.schemas import Task  # noqa: E402
 from idcs.seed_corpus import load_seed_corpus  # noqa: E402
-from idcs.user_proxy import NullUserProxy, OracleUserProxy  # noqa: E402
+from idcs.user_proxy import NullUserProxy, OracleUserProxy, UserProxy  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="  %(levelname)s %(name)s: %(message)s")
 # httpx logs every HTTP request at INFO; our own progress logs supersede that
@@ -65,21 +73,27 @@ def main() -> int:
         print(f"Using {mutator_llm.model} for prompt mutations (main: {llm.model}).")
     generator_prompt = load_prompt("generator_v0")
     distinguisher_prompt = load_prompt("distinguisher_v0")
+    tasks: list[Task]
+    user_factory: Callable[[Task], UserProxy]
 
     if args.benchmark == "seed":
         items = load_seed_corpus()
         tasks = [item.task for item in items]
         gold_map = {item.task.id: item.gold_spec for item in items}
 
-        def user_factory(task):
+        def seed_user_factory(task: Task) -> UserProxy:
             gold = gold_map[task.id]
             return OracleUserProxy(llm, gold_spec_text=gold.model_dump_json(indent=2))
+
+        user_factory = seed_user_factory
 
     else:
         tasks = load_mbpp_plus()
 
-        def user_factory(task):
+        def null_user_factory(task: Task) -> UserProxy:
             return NullUserProxy()
+
+        user_factory = null_user_factory
 
     if args.offset:
         tasks = tasks[args.offset:]
@@ -93,7 +107,7 @@ def main() -> int:
         print("No tasks selected.", file=sys.stderr)
         return 1
 
-    val_tasks: list = []
+    val_tasks: list[Task] = []
     if 0.0 < args.val_fraction < 1.0 and len(tasks) >= 5:
         rng_split = random.Random(args.seed)
         shuffled = list(tasks)
