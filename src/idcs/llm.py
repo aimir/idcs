@@ -42,6 +42,7 @@ CODEX_BACKEND = "codex"
 DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
 DEFAULT_CODEX_TIMEOUT_S = 300.0
 MAX_RETRIES = 5
+JSON_REPAIR_ATTEMPTS = 2
 
 
 class BudgetExceededError(RuntimeError):
@@ -286,14 +287,29 @@ class LLM:
         *,
         max_tokens: int,
     ) -> T:
-        """Parse typed JSON, retrying once when a text backend emits invalid JSON."""
+        """Parse typed JSON, retrying repair prompts when a text backend emits invalid JSON."""
         try:
             return _parse_json_response(raw, output_type)
         except RuntimeError as exc:
+            last_raw = raw
+            last_error = str(exc)
+
+        for _ in range(JSON_REPAIR_ATTEMPTS):
             self._record_structured_fallback(output_type.__name__, "json_repair")
-            repair_user = _json_repair_prompt(original_user, raw, str(exc), output_type)
+            repair_user = _json_repair_prompt(
+                original_user,
+                last_raw,
+                last_error,
+                output_type,
+            )
             repaired = self.complete(system, repair_user, max_tokens=max_tokens)
-            return _parse_json_response(repaired, output_type)
+            try:
+                return _parse_json_response(repaired, output_type)
+            except RuntimeError as exc:
+                last_raw = repaired
+                last_error = str(exc)
+
+        raise RuntimeError(last_error)
 
     def _record_structured_fallback(self, output_type_name: str, reason: str) -> None:
         self.structured_fallback_count += 1
