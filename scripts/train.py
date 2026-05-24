@@ -21,6 +21,9 @@ from idcs.seed_corpus import load_seed_corpus  # noqa: E402
 from idcs.user_proxy import NullUserProxy, OracleUserProxy  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="  %(levelname)s %(name)s: %(message)s")
+# httpx logs every HTTP request at INFO; our own progress logs supersede that
+# and the POST-200 lines just create noise. Bump it to WARNING.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def main() -> int:

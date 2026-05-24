@@ -116,7 +116,12 @@ def coevolve(
         if baseline_scores is not None
         else _compute_baselines(baseline_targets, llm)
     )
-    log.info("baselines ready%s", _calls_so_far(llm))
+    if baselines:
+        bvals = list(baselines.values())
+        log.info(
+            "baselines: min=%.3f mean=%.3f max=%.3f n=%d%s",
+            min(bvals), mean(bvals), max(bvals), len(bvals), _calls_so_far(llm),
+        )
 
     if run_dir is not None:
         _write_config_snapshot(
@@ -197,6 +202,15 @@ def coevolve(
                 weights=weights,
                 max_turns=config.max_turns,
                 baselines=baselines,
+            )
+            log.info(
+                "epoch %d val: benchmark=%.3f rG=%.3f rD=%.3f (n=%d)%s",
+                epoch,
+                val_metrics["val_avg_benchmark"],
+                val_metrics["val_avg_r_generator"],
+                val_metrics["val_avg_r_distinguisher"],
+                int(val_metrics["val_n_tasks"]),
+                _calls_so_far(llm),
             )
             write_metrics(
                 run_dir,
@@ -404,7 +418,7 @@ def _evaluate_candidate(
     opponent_prompt = _sample_opponent(opponent_population, rng)
     breakdowns: list[RewardBreakdown] = []
     rewards: list[float] = []
-    for task in tasks:
+    for i, task in enumerate(tasks, 1):
         generator_prompt = candidate.prompt if role == "generator" else opponent_prompt
         distinguisher_prompt = candidate.prompt if role == "distinguisher" else opponent_prompt
 
@@ -428,6 +442,16 @@ def _evaluate_candidate(
 
         breakdowns.append(breakdown)
         rewards.append(breakdown.r_generator if role == "generator" else breakdown.r_distinguisher)
+        log.info(
+            "      task %d/%d %s: turns=%d benchmark=%.3f reward=%.3f%s",
+            i,
+            len(tasks),
+            task.id,
+            len(trace.turns),
+            benchmark,
+            rewards[-1],
+            _calls_so_far(llm),
+        )
         if run_dir is not None:
             write_trace(run_dir, trace)
             write_metrics(
