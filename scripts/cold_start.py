@@ -11,14 +11,20 @@ Usage:
 
 from __future__ import annotations
 
-import json
+# ruff: noqa: E402, I001
+
 import sys
 from pathlib import Path
 
 # Make `idcs` importable without requiring `pip install -e .`
-_SRC = Path(__file__).resolve().parent.parent / "src"
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) in sys.path:
+    sys.path.remove(str(_SCRIPT_DIR))
+_SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+
+import json
 
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
