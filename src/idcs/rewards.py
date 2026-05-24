@@ -15,6 +15,12 @@ class RewardWeights:
     delta: float = 0.1
     epsilon: float = 0.05
     min_spec_ratio: float = 0.8
+    # Cap on type-2 (user-routed) questions per episode. Above the cap D is
+    # penalized by ``excess_type2_penalty`` per extra question — large enough
+    # that asking a 6th question can't be made profitable by being slightly
+    # useful. design.md: "penalize on the cap, not the average".
+    max_type2_per_episode: int = 5
+    excess_type2_penalty: float = 1.0
 
 
 def compute_reward_breakdown(
@@ -55,11 +61,13 @@ def compute_reward_breakdown(
         - weights.beta * type1_count
         - weights.gamma * spec_complexity_penalty
     )
+    excess_type2 = max(0, type2_count - weights.max_type2_per_episode)
     r_distinguisher = (
         weights.alpha * benchmark_score
         + weights.beta * type1_fixed_count
         + weights.delta * useful_clarification_rate
         - weights.epsilon * type2_dismissed_count
+        - weights.excess_type2_penalty * excess_type2
     )
 
     return RewardBreakdown(

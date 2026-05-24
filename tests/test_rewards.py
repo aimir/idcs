@@ -98,6 +98,69 @@ def test_type1_fixed_credits_actual_fix() -> None:
     assert breakdown.type1_fixed_count == 1
 
 
+def test_excess_type2_penalizes_distinguisher_not_generator() -> None:
+    """Asking more than max_type2 questions penalizes D, leaves G unaffected."""
+    issues = [
+        Issue(
+            kind="ambiguity",
+            route="user",
+            location=f"inputs[{i}].type",
+            description="?",
+            suggested_question="?",
+        )
+        for i in range(7)
+    ]
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_spec(), issues=issues, user_answers={})],
+        final_spec=_spec(),
+    )
+    capped = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=5)
+    uncapped = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=999)
+
+    b_cap = compute_reward_breakdown(trace, "p", benchmark_score=0.5, weights=capped)
+    b_no_cap = compute_reward_breakdown(trace, "p", benchmark_score=0.5, weights=uncapped)
+
+    # G's reward doesn't reference type2_count — unaffected.
+    assert b_cap.r_generator == b_no_cap.r_generator
+    # D pays for the 2 excess questions.
+    assert b_cap.r_distinguisher < b_no_cap.r_distinguisher
+    excess = 7 - 5
+    expected_delta = capped.excess_type2_penalty * excess
+    assert abs((b_no_cap.r_distinguisher - b_cap.r_distinguisher) - expected_delta) < 1e-9
+
+
+def test_at_cap_no_excess_penalty() -> None:
+    """Exactly at the cap, no excess penalty fires."""
+    issues = [
+        Issue(
+            kind="ambiguity",
+            route="user",
+            location=f"x{i}",
+            description="?",
+            suggested_question="?",
+        )
+        for i in range(5)
+    ]
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_spec(), issues=issues, user_answers={})],
+        final_spec=_spec(),
+    )
+    weights = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=5)
+    b = compute_reward_breakdown(trace, "p", benchmark_score=0.5, weights=weights)
+    # All 5 dismissed → epsilon penalty fires, but no excess penalty
+    assert b.type2_dismissed_count == 5
+    # excess_type2 = 0 so the only D penalty is epsilon * 5
+    expected = (
+        weights.alpha * 0.5
+        + weights.beta * 0  # no type1_fixed
+        + weights.delta * 0  # no baseline → useful_rate = 0
+        - weights.epsilon * 5
+    )
+    assert abs(b.r_distinguisher - expected) < 1e-9
+
+
 def test_route_change_does_not_count_as_fixed() -> None:
     """D moving a gap from generator-routed to user-routed isn't a fix."""
     t1 = Issue(kind="gap", route="generator", location="goal", description="a")
