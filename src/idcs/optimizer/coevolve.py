@@ -16,7 +16,7 @@ from idcs.benchmark.scoring import score
 from idcs.coder import Coder
 from idcs.distinguisher import Distinguisher
 from idcs.generator import Generator
-from idcs.llm import LLMClient
+from idcs.llm import BudgetExceededError, LLMClient
 from idcs.optimizer.mutate import Mutator
 from idcs.optimizer.population import Population, PromptCandidate
 from idcs.orchestrator import run_episode
@@ -483,19 +483,44 @@ def _evaluate_candidate(
         distinguisher = Distinguisher(llm, prompt=distinguisher_prompt)
         user = user_factory(task)
 
-        trace = run_episode(task, generator, distinguisher, user, max_turns=config.max_turns)
-        trace.generator_prompt_hash = _hash_prompt(generator_prompt)
-        trace.distinguisher_prompt_hash = _hash_prompt(distinguisher_prompt)
-        benchmark = _score_trace(task, trace, coder)
-        trace.benchmark_score = benchmark
-        breakdown = compute_reward_breakdown(
-            trace,
-            task.prompt,
-            benchmark_score=benchmark,
-            weights=weights,
-            baseline_score=baselines.get(task.id),
-        )
-        trace.rewards = breakdown
+        try:
+            trace = run_episode(task, generator, distinguisher, user, max_turns=config.max_turns)
+            trace.generator_prompt_hash = _hash_prompt(generator_prompt)
+            trace.distinguisher_prompt_hash = _hash_prompt(distinguisher_prompt)
+            benchmark = _score_trace(task, trace, coder)
+            trace.benchmark_score = benchmark
+            breakdown = compute_reward_breakdown(
+                trace,
+                task.prompt,
+                benchmark_score=benchmark,
+                weights=weights,
+                baseline_score=baselines.get(task.id),
+            )
+            trace.rewards = breakdown
+            error_type = None
+            error_message = None
+        except BudgetExceededError:
+            raise
+        except Exception as exc:
+            benchmark = 0.0
+            breakdown = RewardBreakdown(
+                benchmark_score=benchmark,
+                r_generator=-1.0,
+                r_distinguisher=-1.0,
+            )
+            error_type = type(exc).__name__
+            error_message = str(exc)
+            trace = None
+            log.warning(
+                "      task %d/%d %s failed for %s candidate %s: %s: %s",
+                i,
+                len(tasks),
+                task.id,
+                role,
+                _hash_prompt(candidate.prompt),
+                error_type,
+                error_message,
+            )
 
         breakdowns.append(breakdown)
         rewards.append(breakdown.r_generator if role == "generator" else breakdown.r_distinguisher)
@@ -504,25 +529,27 @@ def _evaluate_candidate(
             i,
             len(tasks),
             task.id,
-            len(trace.turns),
+            len(trace.turns) if trace is not None else 0,
             benchmark,
             rewards[-1],
             _calls_so_far(llm),
         )
         if run_dir is not None:
-            write_trace(run_dir, trace)
-            write_metrics(
-                run_dir,
-                _trace_metrics(
-                    epoch=epoch,
-                    role=role,
-                    task_id=task.id,
-                    prompt=candidate.prompt,
-                    reward=rewards[-1],
-                    benchmark_score=benchmark,
-                    llm=llm,
-                ),
+            if trace is not None:
+                write_trace(run_dir, trace)
+            metrics = _trace_metrics(
+                epoch=epoch,
+                role=role,
+                task_id=task.id,
+                prompt=candidate.prompt,
+                reward=rewards[-1],
+                benchmark_score=benchmark,
+                llm=llm,
             )
+            if error_type is not None:
+                metrics["error_type"] = error_type
+                metrics["error_message"] = error_message[:500] if error_message else ""
+            write_metrics(run_dir, metrics)
 
     candidate.reward = mean(rewards) if rewards else 0.0
     candidate.breakdowns = breakdowns

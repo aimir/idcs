@@ -91,6 +91,37 @@ def test_codex_backend_defaults_to_small_model(monkeypatch: pytest.MonkeyPatch) 
     assert commands[0][commands[0].index("--model") + 1] == DEFAULT_CODEX_MODEL
 
 
+def test_codex_backend_accepts_fast_service_tier_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        timeout: float,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del input, text, capture_output, timeout, check
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text("ok", encoding="utf-8")
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.setenv("IDCS_CODEX_SERVICE_TIER", "fast")
+    monkeypatch.setenv("IDCS_CODEX_REASONING_EFFORT", "none")
+    monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+
+    assert LLM().complete("system", "user") == "ok"
+    assert "-c" in commands[0]
+    assert 'service_tier="fast"' in commands[0]
+    assert 'model_reasoning_effort="none"' in commands[0]
+
+
 def test_codex_complete_typed_parses_json_response(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts: list[str] = []
 
@@ -118,6 +149,39 @@ def test_codex_complete_typed_parses_json_response(monkeypatch: pytest.MonkeyPat
     assert result == Answer(value=7)
     assert "Respond with a single JSON object" in prompts[0]
     assert '"value"' in prompts[0]
+
+
+def test_codex_complete_typed_repairs_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts: list[str] = []
+    outputs = ['{"value": "broken}', '{"value": 7}']
+
+    def fake_run(
+        command: list[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        timeout: float,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del text, capture_output, timeout, check
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text(outputs.pop(0), encoding="utf-8")
+        prompts.append(input)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+
+    llm = LLM()
+    result = llm.complete_typed("system", "give me json", Answer)
+
+    assert result == Answer(value=7)
+    assert llm.calls_made == 2
+    assert llm.structured_fallback_count == 1
+    assert "could not be parsed" in prompts[1]
+    assert "Return only one valid JSON object" in prompts[1]
 
 
 def test_codex_failure_omits_captured_output(
