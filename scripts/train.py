@@ -14,7 +14,7 @@ if str(_SRC) not in sys.path:
 
 from idcs._prompts import load_prompt  # noqa: E402
 from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
-from idcs.llm import LLM  # noqa: E402
+from idcs.llm import LLM, BudgetExceededError  # noqa: E402
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve  # noqa: E402
 from idcs.seed_corpus import load_seed_corpus  # noqa: E402
 from idcs.user_proxy import NullUserProxy, OracleUserProxy  # noqa: E402
@@ -41,9 +41,18 @@ def main() -> int:
         default=0.0,
         help="Hold out this fraction of tasks for monitor-only val eval per epoch (e.g. 0.2).",
     )
+    parser.add_argument(
+        "--max-llm-calls",
+        type=int,
+        default=None,
+        help=(
+            "Hard ceiling on total LLM API calls (main + mutator). "
+            "Once hit, the next call raises BudgetExceededError and the run exits."
+        ),
+    )
     args = parser.parse_args()
 
-    llm = LLM()
+    llm = LLM(max_calls=args.max_llm_calls)
     generator_prompt = load_prompt("generator_v0")
     distinguisher_prompt = load_prompt("distinguisher_v0")
 
@@ -94,19 +103,25 @@ def main() -> int:
         telemetry=not args.no_telemetry,
     )
 
-    result = coevolve(
-        tasks,
-        llm,
-        generator_prompt=generator_prompt,
-        distinguisher_prompt=distinguisher_prompt,
-        user_factory=user_factory,
-        config=config,
-        val_tasks=val_tasks or None,
-    )
+    try:
+        result = coevolve(
+            tasks,
+            llm,
+            generator_prompt=generator_prompt,
+            distinguisher_prompt=distinguisher_prompt,
+            user_factory=user_factory,
+            config=config,
+            val_tasks=val_tasks or None,
+        )
+    except BudgetExceededError as e:
+        print(f"\nBUDGET EXHAUSTED: {e}", file=sys.stderr)
+        print(f"LLM calls used: {llm.calls_made}", file=sys.stderr)
+        return 2
 
     print(f"Run dir: {result.run_dir}" if result.run_dir else "Telemetry disabled")
     print(f"Best generator reward: {result.generator.best().reward:.4f}")
     print(f"Best distinguisher reward: {result.distinguisher.best().reward:.4f}")
+    print(f"LLM calls used: {llm.calls_made}")
     return 0
 
 
