@@ -2,7 +2,15 @@
   "task": {
     "id": "seed/05-binary-search",
     "prompt": "Write a function `bsearch(xs, target)` that returns the index of `target` in the sorted list `xs`, or -1 if not present.",
-    "tests": []
+    "tests": [
+      {"id": "seed/05-binary-search/t0", "code": "assert bsearch([1, 2, 3, 4, 5], 3) == 2"},
+      {"id": "seed/05-binary-search/t1", "code": "assert bsearch([1, 2, 3, 4, 5], 1) == 0"},
+      {"id": "seed/05-binary-search/t2", "code": "assert bsearch([1, 2, 3, 4, 5], 5) == 4"},
+      {"id": "seed/05-binary-search/t3", "code": "assert bsearch([1, 2, 3, 4, 5], 99) == -1"},
+      {"id": "seed/05-binary-search/t4", "code": "assert bsearch([], 1) == -1"},
+      {"id": "seed/05-binary-search/t5", "code": "assert bsearch([42], 42) == 0"},
+      {"id": "seed/05-binary-search/t6", "code": "assert bsearch([1, 1, 2, 3], 1) in (0, 1)"}
+    ]
   },
   "gold_spec": {
     "goal": "Locate `target` in a sorted list using O(log n) comparisons; return its index, or -1 if absent.",

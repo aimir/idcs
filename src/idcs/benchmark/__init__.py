@@ -1,5 +1,7 @@
-"""idcs.benchmark — spec → code → score pipeline.
+"""idcs.benchmark — integration layer for an external benchmark library.
 
-Phase 0 only contains the sandbox stub. Task loading and end-to-end scoring
-arrive in Phase 2.
+Code execution and grading are intentionally out of scope for this project.
+We wrap a third-party library (default: EvalPlus) that already does both.
+This package contains only the task-loading adapter and a thin scoring
+wrapper around the library's grader call.
 """

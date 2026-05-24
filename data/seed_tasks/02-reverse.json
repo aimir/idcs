@@ -2,7 +2,14 @@
   "task": {
     "id": "seed/02-reverse",
     "prompt": "Write a function `reverse(s)` that returns the input string reversed.",
-    "tests": []
+    "tests": [
+      {"id": "seed/02-reverse/t0", "code": "assert reverse('hello') == 'olleh'"},
+      {"id": "seed/02-reverse/t1", "code": "assert reverse('') == ''"},
+      {"id": "seed/02-reverse/t2", "code": "assert reverse('a') == 'a'"},
+      {"id": "seed/02-reverse/t3", "code": "assert reverse('racecar') == 'racecar'"},
+      {"id": "seed/02-reverse/t4", "code": "assert reverse('123 456') == '654 321'"},
+      {"id": "seed/02-reverse/t5", "code": "assert reverse('AbC') == 'CbA'"}
+    ]
   },
   "gold_spec": {
     "goal": "Return the input string with its code points in reverse order.",

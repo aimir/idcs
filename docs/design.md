@@ -52,7 +52,7 @@ input ──► G ──► spec_0
               G(spec_0, issues, answers) ──► spec_1 ──► ... (until D returns ∅ or max_turns)
                                                             │
                                                             ▼
-                                                  spec→code→tests ──► benchmark_score
+                                              coder(spec) ──► external grader ──► benchmark_score
 ```
 
 `user_proxy` during training is an oracle LLM with access to the gold
@@ -114,9 +114,8 @@ idcs/
     orchestrator.py         # run_episode(task, G, D, user) -> Trace
     coder.py                # spec -> code (frozen prompt, not optimized)
     benchmark/
-      tasks.py              # load HumanEval+/MBPP+/custom
-      runner.py             # sandboxed test execution
-      score.py
+      tasks.py              # adapter for the external benchmark library
+      scoring.py            # thin wrapper around the library's grader call
     rewards.py              # compute R_G, R_D from Trace
     optimizer/
       population.py

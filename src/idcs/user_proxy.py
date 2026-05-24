@@ -26,6 +26,14 @@ def _default_prompt() -> str:
 
 
 @dataclass
+class NullUserProxy:
+    """User proxy that always refuses. For automated baselines."""
+
+    def answer(self, location: str, question: str) -> str | None:
+        return None
+
+
+@dataclass
 class OracleUserProxy:
     """Answers from a gold spec under a minimal-disclosure policy.
 

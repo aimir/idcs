@@ -2,7 +2,15 @@
   "task": {
     "id": "seed/04-is-palindrome",
     "prompt": "Write a function `is_palindrome(s)` that returns True if the string is a palindrome.",
-    "tests": []
+    "tests": [
+      {"id": "seed/04-is-palindrome/t0", "code": "assert is_palindrome('racecar') == True"},
+      {"id": "seed/04-is-palindrome/t1", "code": "assert is_palindrome('hello') == False"},
+      {"id": "seed/04-is-palindrome/t2", "code": "assert is_palindrome('') == True"},
+      {"id": "seed/04-is-palindrome/t3", "code": "assert is_palindrome('a') == True"},
+      {"id": "seed/04-is-palindrome/t4", "code": "assert is_palindrome('Racecar') == False"},
+      {"id": "seed/04-is-palindrome/t5", "code": "assert is_palindrome('a b a') == True"},
+      {"id": "seed/04-is-palindrome/t6", "code": "assert is_palindrome('a, b, a') == False"}
+    ]
   },
   "gold_spec": {
     "goal": "Return True iff s reads the same forwards and backwards, with no preprocessing.",

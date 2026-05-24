@@ -28,6 +28,7 @@ class Task(BaseModel):
 
     id: str
     prompt: str
+    entry_point: str | None = None
     tests: list[Test]
 
 

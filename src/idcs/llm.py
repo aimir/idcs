@@ -14,16 +14,53 @@ constructor arg or the ``IDCS_MODEL`` env var.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
+import time
+from collections.abc import Callable
 from typing import Any, Protocol, TypeVar
 
 import openai
-from pydantic import BaseModel
+from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError
+
+# Load .env so OPENROUTER_API_KEY / IDCS_MODEL are available to LLM().
+# Safe to call here — openai's SDK reads env vars at client instantiation,
+# not at import time.
+load_dotenv()
+
+log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4.5"
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+MAX_RETRIES = 5
+
+
+def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_ret:
+    """Call fn(), retrying on transient 429/5xx with exponential backoff."""
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except openai.RateLimitError:
+            if attempt == max_retries:
+                raise
+            delay = (2**attempt) + random.uniform(0, 1)
+            log.warning("429 rate-limited, retry %d/%d in %.1fs", attempt + 1, max_retries, delay)
+            time.sleep(delay)
+        except openai.APIStatusError as e:
+            if e.status_code < 500 or attempt == max_retries:
+                raise
+            delay = (2**attempt) + random.uniform(0, 1)
+            log.warning(
+                "%d server error, retry %d/%d in %.1fs",
+                e.status_code, attempt + 1, max_retries, delay,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable")
 
 T = TypeVar("T", bound=BaseModel)
+T_ret = TypeVar("T_ret")
 
 
 class LLMClient(Protocol):
@@ -94,14 +131,16 @@ class LLM:
         max_tokens: int = 16000,
     ) -> str:
         """Return the assistant message's text content (empty string if absent)."""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            extra_body=self._extra_body,
+        response = _with_retry(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                extra_body=self._extra_body,
+            )
         )
         return response.choices[0].message.content or ""
 
@@ -115,35 +154,89 @@ class LLM:
     ) -> T:
         """Return a parsed pydantic instance of ``output_type``.
 
-        Belt and suspenders: ``response_format`` carries the schema to
-        providers that honor ``json_schema`` mode, and a copy of the schema
-        plus the literal word "JSON" goes into the user message for providers
-        that downgrade to ``json_object`` mode. OpenRouter's
-        ``require_parameters`` filter checks parameter *names* (does the
-        provider accept ``response_format``?) not subtypes (does it honor
-        ``json_schema``?) — Alibaba/Qwen passes the filter and then strips
-        the schema, so the in-prompt copy is the actual safety net.
+        Tries ``beta.chat.completions.parse`` first (works with Claude, GPT-4o).
+        Falls back to plain completion + manual JSON extraction for providers
+        like Qwen that echo back the schema instead of conforming to it.
         """
         schema_text = json.dumps(output_type.model_json_schema(), indent=2)
         augmented_user = (
             f"{user}\n\n"
-            f"Respond with a single JSON object matching this schema:\n"
-            f"```json\n{schema_text}\n```"
+            f"Respond with a single JSON object that **conforms to** the schema "
+            f"below. You must produce an INSTANCE — concrete values for each "
+            f"field — not the schema definition itself. Do not include `$schema`, "
+            f"`type: object`, `properties`, `required`, or `$defs` keys in your "
+            f"response.\n\n"
+            f"Schema:\n```json\n{schema_text}\n```"
         )
-        response = self.client.beta.chat.completions.parse(
-            model=self.model,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": augmented_user},
-            ],
-            response_format=output_type,
-            extra_body=self._extra_body,
-        )
-        parsed = response.choices[0].message.parsed
-        if parsed is None:
-            raise RuntimeError(
-                f"LLM did not produce a parseable {output_type.__name__}; "
-                f"finish_reason={response.choices[0].finish_reason}"
+        try:
+            response = _with_retry(
+                lambda: self.client.beta.chat.completions.parse(
+                    model=self.model,
+                    max_tokens=max_tokens,
+                    messages=[
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": augmented_user},
+                    ],
+                    response_format=output_type,
+                    extra_body=self._extra_body,
+                )
             )
-        return parsed
+            parsed = response.choices[0].message.parsed
+            if parsed is not None:
+                return parsed
+        except (ValidationError, KeyError):
+            log.warning(
+                "Structured parse failed for %s, falling back to text extraction",
+                output_type.__name__,
+            )
+
+        raw = self.complete(system, augmented_user, max_tokens=max_tokens)
+        return _parse_json_response(raw, output_type)
+
+
+def _parse_json_response(raw: str, output_type: type[T]) -> T:
+    """Extract JSON from raw LLM text (strips markdown fences) and validate."""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    # Handle case where model wraps JSON in other text — find first { to last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1:
+        text = text[start : end + 1]
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"Could not parse model output as JSON ({e}). "
+            f"Raw response (first 500 chars):\n{raw[:500]}"
+        ) from e
+
+    # Some providers (notably Qwen via Alibaba) ignore the "produce an
+    # instance" instruction and echo the schema we sent them. Catch that
+    # explicitly so the error is actionable rather than a confusing pydantic
+    # "field required" message about the schema metadata.
+    if isinstance(data, dict) and _looks_like_schema_echo(data):
+        raise RuntimeError(
+            f"Model returned a JSON schema instead of a {output_type.__name__} "
+            f"instance. This is a known failure mode of some providers — "
+            f"set IDCS_MODEL to a model with reliable structured-output "
+            f"support (e.g. anthropic/claude-sonnet-4.5, openai/gpt-4o, "
+            f"google/gemini-2.5-pro) and retry."
+        )
+
+    return output_type.model_validate(data)
+
+
+def _looks_like_schema_echo(data: dict[str, Any]) -> bool:
+    """Heuristic: did the provider echo back the JSON schema verbatim?"""
+    if "$schema" in data:
+        return True
+    # Bare schema shape: ``type: object`` + ``properties`` at top level
+    return data.get("type") == "object" and "properties" in data
+

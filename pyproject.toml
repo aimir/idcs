@@ -6,6 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "openai>=1.50",
     "pydantic>=2.0",
+    "evalplus>=0.3",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -37,3 +39,11 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 python_version = "3.11"
 strict = true
 files = ["src/idcs"]
+
+[[tool.mypy.overrides]]
+module = "evalplus.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "dotenv"
+ignore_missing_imports = true

@@ -2,7 +2,13 @@
   "task": {
     "id": "seed/03-max-of-list",
     "prompt": "Write a function `max_of(xs)` that returns the largest element of a list of numbers.",
-    "tests": []
+    "tests": [
+      {"id": "seed/03-max-of-list/t0", "code": "assert max_of([1, 2, 3]) == 3"},
+      {"id": "seed/03-max-of-list/t1", "code": "assert max_of([-10, -5, -20]) == -5"},
+      {"id": "seed/03-max-of-list/t2", "code": "assert max_of([42]) == 42"},
+      {"id": "seed/03-max-of-list/t3", "code": "assert max_of([1.5, 2.5, 2.5]) == 2.5"},
+      {"id": "seed/03-max-of-list/t4", "code": "assert max_of([1, 2.5, 3]) == 3"}
+    ]
   },
   "gold_spec": {
     "goal": "Return the maximum element of a list of int or float.",
