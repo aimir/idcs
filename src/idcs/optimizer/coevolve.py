@@ -76,6 +76,17 @@ def coevolve(
         raise ValueError("tasks must be non-empty")
     weights = weights or RewardWeights()
     config = config or CoevolveConfig()
+    if config.elite_size >= config.population_size:
+        capped = max(1, config.population_size - 1)
+        log.warning(
+            "elite_size (%d) >= population_size (%d) leaves no slots for "
+            "mutations between epochs — capping elite_size to %d so the "
+            "loop can actually evolve.",
+            config.elite_size,
+            config.population_size,
+            capped,
+        )
+        config = dataclasses.replace(config, elite_size=capped)
     rng = random.Random(config.seed)
     run_dir = create_run_dir() if config.telemetry else None
 
