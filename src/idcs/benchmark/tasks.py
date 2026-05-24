@@ -19,18 +19,15 @@ from idcs.schemas import Task, Test
 MBPP_PLUS_DATASET = "mbpp-plus"
 HARD_DATASET = "hard"
 
-# Small MBPP+ slice chosen for underspecified edge semantics rather than
-# algorithmic difficulty. These are the tasks where a better spec should matter.
+# Small MBPP+ slice chosen by direct-only probing for underspecified edge
+# semantics rather than algorithmic difficulty. These are tasks where
+# gpt-5.4-mini was not already perfect, so a spec loop has room to matter.
 HARD_MBPP_PLUS_IDS: tuple[str, ...] = (
-    "Mbpp/459",  # remove uppercase characters, including empty/all-uppercase strings
-    "Mbpp/11",  # remove first and last occurrence only
-    "Mbpp/100",  # next palindrome: 0/1/9/carry/already-palindrome cases
-    "Mbpp/733",  # leftmost duplicate in sorted arrays
-    "Mbpp/580",  # recursively preserve nested tuple structure while filtering
-    "Mbpp/572",  # keep values appearing exactly once, not ordinary dedupe
-    "Mbpp/758",  # tuple-key list counting, including empty sublists
-    "Mbpp/94",  # first tuple field at the minimum second field
-    "Mbpp/167",  # 0 -> 1 and exact powers of two
+    "Mbpp/639",  # count only proper-cased names, not every non-lowercase start
+    "Mbpp/427",  # rewrite date-shaped text, including non-calendar dates
+    "Mbpp/459",  # keep lowercase letters only, not punctuation or non-uppercase chars
+    "Mbpp/92",  # undulating means exactly two alternating digits, including short cases
+    "Mbpp/597",  # kth merged element with empty arrays and mixed comparable values
 )
 
 HUMANEVAL_PLUS_FOLLOWUP_IDS: tuple[str, ...] = (

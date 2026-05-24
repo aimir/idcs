@@ -90,9 +90,22 @@ def _score_mbpp_plus(task: Task, code: str) -> ScoreResult:
     plus_expected = list(expected[task.id].get("plus") or [])
     base_inputs = list(problem.get("base_input") or [])
     base_expected = list(expected[task.id].get("base") or [])
+    atol = float(problem.get("atol") or 0.0)
 
-    plus_results, plus_err = _run_grader(code, entry_point, plus_inputs, plus_expected)
-    base_results, base_err = _run_grader(code, entry_point, base_inputs, base_expected)
+    plus_results, plus_err = _run_grader(
+        code,
+        entry_point,
+        plus_inputs,
+        plus_expected,
+        atol=atol,
+    )
+    base_results, base_err = _run_grader(
+        code,
+        entry_point,
+        base_inputs,
+        base_expected,
+        atol=atol,
+    )
 
     plus_passed = sum(1 for r in plus_results if r)
     plus_total = len(plus_results)
@@ -120,19 +133,40 @@ def _score_mbpp_plus(task: Task, code: str) -> ScoreResult:
 # and print pass/fail booleans behind a marker so we can find them
 # even if the user code itself prints to stdout.
 _HARNESS = '''\
+import math
 import sys
 
 # ----- USER CODE -----
 {code}
 # ----- END USER CODE -----
 
+# ``repr(float("inf"))`` is ``inf``. Define these names so EvalPlus cases
+# containing infinities remain valid Python literals inside this harness.
+inf = float("inf")
+nan = float("nan")
+
 _inputs = {inputs}
 _expected = {expected}
+_atol = {atol}
+
+def _idcs_equal(actual, expected, atol):
+    if isinstance(actual, float) or isinstance(expected, float):
+        return math.isclose(actual, expected, rel_tol=0.0, abs_tol=atol)
+    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
+        return len(actual) == len(expected) and all(
+            _idcs_equal(a, e, atol) for a, e in zip(actual, expected, strict=True)
+        )
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            _idcs_equal(actual[key], expected[key], atol) for key in expected
+        )
+    return actual == expected
+
 _results = []
 for _inp, _exp in zip(_inputs, _expected):
     try:
         _actual = {entry}(*_inp)
-        _results.append(_actual == _exp)
+        _results.append(_idcs_equal(_actual, _exp, _atol))
     except BaseException:
         _results.append(False)
 
@@ -146,6 +180,7 @@ def _run_grader(
     entry: str,
     inputs: list[Any],
     expected: list[Any],
+    atol: float = 0.0,
     timeout_s: float = SUBPROCESS_TIMEOUT,
 ) -> tuple[list[bool], str | None]:
     if not inputs:
@@ -156,6 +191,7 @@ def _run_grader(
             code=code,
             inputs=repr(inputs),
             expected=repr(expected),
+            atol=repr(atol),
             entry=entry,
             marker=SCORE_MARKER,
         )
@@ -225,4 +261,3 @@ def _score_local(task: Task, code: str) -> ScoreResult:
         pass_rate=passed / total,
         errors=errors,
     )
-

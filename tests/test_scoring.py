@@ -188,3 +188,29 @@ class TestRunGraderEndToEnd:
         )
         assert err is None
         assert results == [True]
+
+    def test_infinite_float_inputs_are_valid_literals(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        inf = float("inf")
+        results, err = _run_grader(
+            code="def minimum(a, b):\n    return min(a, b)\n",
+            entry="minimum",
+            inputs=[[-inf, inf], [1, inf]],
+            expected=[-inf, 1],
+        )
+        assert err is None
+        assert results == [True, True]
+
+    def test_float_outputs_use_evalplus_tolerance(self) -> None:
+        from idcs.benchmark.scoring import _run_grader
+
+        results, err = _run_grader(
+            code="def add_float(a, b):\n    return a + b\n",
+            entry="add_float",
+            inputs=[[0.1, 0.2]],
+            expected=[0.3],
+            atol=1e-9,
+        )
+        assert err is None
+        assert results == [True]
