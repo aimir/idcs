@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,14 @@ from idcs.rewards import RewardWeights, compute_reward_breakdown
 from idcs.schemas import RewardBreakdown, Task, Trace
 from idcs.telemetry import create_run_dir, write_metrics, write_trace
 from idcs.user_proxy import UserProxy
+
+log = logging.getLogger(__name__)
+
+
+def _calls_so_far(llm: LLMClient) -> str:
+    """Render the running LLM call count if the client tracks it."""
+    n = getattr(llm, "calls_made", None)
+    return f" [{n} calls]" if n is not None else ""
 
 
 @dataclass
@@ -74,12 +83,29 @@ def coevolve(
     # floor in useful_clarification_rate attribution. Computed once for the
     # whole training run; without this, baseline_score=None forces the
     # clarification-rate term to 0 on every candidate evaluation.
+    log.info(
+        "coevolve start: pop=%d elite=%d epochs=%d max_turns=%d "
+        "tasks_train=%d tasks_val=%d task_sample=%s",
+        config.population_size,
+        config.elite_size,
+        config.epochs,
+        config.max_turns,
+        len(tasks),
+        len(val_tasks or []),
+        config.task_sample_size,
+    )
     baseline_targets = list(tasks) + list(val_tasks or [])
+    if baseline_scores is None:
+        log.info(
+            "computing no-spec baselines for %d tasks...",
+            len(baseline_targets),
+        )
     baselines = (
         baseline_scores
         if baseline_scores is not None
         else _compute_baselines(baseline_targets, llm)
     )
+    log.info("baselines ready%s", _calls_so_far(llm))
 
     if run_dir is not None:
         _write_config_snapshot(
@@ -93,14 +119,17 @@ def coevolve(
         )
 
     mutator = Mutator(mutator_llm if mutator_llm is not None else llm)
+    log.info("seeding initial populations via mutator...")
     generator_pop = _init_population(
         generator_prompt, config.population_size, mutator, "generator", rng
     )
     distinguisher_pop = _init_population(
         distinguisher_prompt, config.population_size, mutator, "distinguisher", rng
     )
+    log.info("initial populations ready%s", _calls_so_far(llm))
 
     for epoch in range(1, config.epochs + 1):
+        log.info("=== epoch %d/%d ===", epoch, config.epochs)
         generator_pop = _evolve_population(
             role="generator",
             population=generator_pop,
@@ -115,6 +144,13 @@ def coevolve(
             run_dir=run_dir,
             epoch=epoch,
             baselines=baselines,
+        )
+        log.info(
+            "epoch %d generator: best=%.3f avg=%.3f%s",
+            epoch,
+            generator_pop.best().reward,
+            mean(generator_pop.rewards()),
+            _calls_so_far(llm),
         )
         distinguisher_pop = _evolve_population(
             role="distinguisher",
@@ -131,8 +167,16 @@ def coevolve(
             epoch=epoch,
             baselines=baselines,
         )
+        log.info(
+            "epoch %d distinguisher: best=%.3f avg=%.3f%s",
+            epoch,
+            distinguisher_pop.best().reward,
+            mean(distinguisher_pop.rewards()),
+            _calls_so_far(llm),
+        )
 
         if val_tasks and run_dir is not None:
+            log.info("epoch %d val eval (%d tasks)...", epoch, len(val_tasks))
             val_metrics = _evaluate_on_val(
                 g_prompt=generator_pop.best().prompt,
                 d_prompt=distinguisher_pop.best().prompt,
@@ -273,23 +317,31 @@ def _evolve_population(
     epoch: int,
     baselines: dict[str, float],
 ) -> Population:
-    evaluated = [
-        _evaluate_candidate(
-            role=role,
-            candidate=candidate,
-            opponent_population=opponent_population,
-            tasks=tasks,
-            llm=llm,
-            user_factory=user_factory,
-            weights=weights,
-            config=config,
-            rng=rng,
-            run_dir=run_dir,
-            epoch=epoch,
-            baselines=baselines,
+    log.info(
+        "  evolving %s: %d candidates × %d tasks",
+        role,
+        len(population.members),
+        len(tasks),
+    )
+    evaluated: list[PromptCandidate] = []
+    for i, candidate in enumerate(population.members, 1):
+        log.info("    %s candidate %d/%d%s", role, i, len(population.members), _calls_so_far(llm))
+        evaluated.append(
+            _evaluate_candidate(
+                role=role,
+                candidate=candidate,
+                opponent_population=opponent_population,
+                tasks=tasks,
+                llm=llm,
+                user_factory=user_factory,
+                weights=weights,
+                config=config,
+                rng=rng,
+                run_dir=run_dir,
+                epoch=epoch,
+                baselines=baselines,
+            )
         )
-        for candidate in population.members
-    ]
     evaluated_population = Population(members=evaluated)
     elites = evaluated_population.top_k(config.elite_size)
     if run_dir is not None and evaluated_population.members:
