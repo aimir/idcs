@@ -53,7 +53,14 @@ class Spec(BaseModel):
     acceptance_criteria: list[str] = PydField(default_factory=list)
 
 
-IssueKind = Literal["gap", "ambiguity", "contradiction", "over_constraint"]
+IssueKind = Literal[
+    "gap",
+    "ambiguity",
+    "contradiction",
+    "over_constraint",
+    "underconstraint",
+    "implicit_assumption",
+]
 IssueRoute = Literal["generator", "user"]
 
 
