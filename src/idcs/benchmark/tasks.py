@@ -56,6 +56,14 @@ HARD_MBPP_TEST_IDS: tuple[str, ...] = (
     "Mbpp/757",  # reverse-pair counting without double counting
     "Mbpp/576",  # sublist means subsequence, not contiguous slice
     "Mbpp/765",  # nth polite number formula boundary
+    "Mbpp/99",  # binary string output, no leading zeros, zero boundary
+    "Mbpp/473",  # tuple intersection ignores tuple element order
+    "Mbpp/777",  # non-repeated means values that occur exactly once
+    "Mbpp/305",  # find two p-starting words across strings, preserving order
+    "Mbpp/759",  # decimal number with exactly two digits of precision
+    "Mbpp/161",  # remove every element whose value appears in another list
+    "Mbpp/630",  # adjacent coordinate grid includes center and fixed ordering
+    "Mbpp/794",  # regex-like a...b match must cover the full string
 )
 
 HARD_MBPP_EXTENDED_IDS: tuple[str, ...] = (

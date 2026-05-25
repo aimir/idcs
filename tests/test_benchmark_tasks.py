@@ -101,6 +101,7 @@ def test_hard_slice_loads_intended_mbpp_plus_ids() -> None:
 
 def test_hard_generalization_splits_are_disjoint_and_ordered() -> None:
     assert HARD_MBPP_TRAIN_IDS == HARD_MBPP_PLUS_IDS
+    assert len(HARD_MBPP_TEST_IDS) > len(HARD_MBPP_TRAIN_IDS)
     assert not set(HARD_MBPP_TRAIN_IDS) & set(HARD_MBPP_DEV_IDS)
     assert not set(HARD_MBPP_TRAIN_IDS) & set(HARD_MBPP_TEST_IDS)
     assert not set(HARD_MBPP_DEV_IDS) & set(HARD_MBPP_TEST_IDS)
