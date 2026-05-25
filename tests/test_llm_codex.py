@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from idcs.llm import DEFAULT_CODEX_MODEL, LLM, BudgetExceededError
+from idcs.llm import DEFAULT_CODEX_MODEL, LLM, BudgetExceededError, runtime_snapshot
 
 
 class Answer(BaseModel):
@@ -329,3 +329,37 @@ def test_codex_backend_respects_call_budget(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(BudgetExceededError):
         llm.complete("system", "user")
     assert llm.calls_made == 1
+
+
+def test_runtime_snapshot_records_codex_model_and_knobs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.setenv("IDCS_CODEX_MODEL", "gpt-test")
+    monkeypatch.setenv("IDCS_CODEX_TIMEOUT_S", "123")
+    monkeypatch.setenv("IDCS_CODEX_SERVICE_TIER", "fast")
+    monkeypatch.setenv("IDCS_CODEX_REASONING_EFFORT", "none")
+
+    assert runtime_snapshot() == {
+        "backend": "codex",
+        "model": "gpt-test",
+        "codex_timeout_s": 123.0,
+        "codex_service_tier": "fast",
+        "codex_reasoning_effort": "none",
+    }
+
+
+def test_runtime_snapshot_records_openrouter_model_without_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("IDCS_BACKEND", raising=False)
+    monkeypatch.setenv("IDCS_MODEL", "provider/model")
+    monkeypatch.setenv("IDCS_API_KEY", "secret-value")
+
+    snapshot = runtime_snapshot()
+
+    assert snapshot["backend"] == "openrouter"
+    assert snapshot["model"] == "provider/model"
+    assert snapshot["base_url"] == "https://openrouter.ai/api/v1"
+    assert snapshot["require_parameters"] is True
+    assert "secret-value" not in str(snapshot)

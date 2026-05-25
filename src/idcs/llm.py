@@ -431,6 +431,51 @@ def _float_env(name: str, default: float) -> float:
         raise ValueError(f"{name} must be a number.") from exc
 
 
+def runtime_snapshot(llm: Any | None = None) -> dict[str, Any]:
+    """Return non-secret LLM runtime metadata for benchmark artifacts."""
+    backend = str(
+        getattr(llm, "backend", None)
+        or os.environ.get("IDCS_BACKEND")
+        or DEFAULT_BACKEND
+    ).lower()
+    model = getattr(llm, "model", None)
+    if model is None:
+        model = (
+            os.environ.get("IDCS_CODEX_MODEL")
+            if backend == CODEX_BACKEND
+            else os.environ.get("IDCS_MODEL")
+        )
+    if model is None:
+        model = DEFAULT_CODEX_MODEL if backend == CODEX_BACKEND else DEFAULT_MODEL
+
+    snapshot: dict[str, Any] = {
+        "backend": backend,
+        "model": model,
+    }
+    if backend == CODEX_BACKEND:
+        snapshot.update(
+            {
+                "codex_timeout_s": getattr(
+                    llm,
+                    "codex_timeout_s",
+                    _float_env("IDCS_CODEX_TIMEOUT_S", DEFAULT_CODEX_TIMEOUT_S),
+                ),
+                "codex_service_tier": os.environ.get("IDCS_CODEX_SERVICE_TIER"),
+                "codex_reasoning_effort": os.environ.get(
+                    "IDCS_CODEX_REASONING_EFFORT"
+                ),
+            }
+        )
+    else:
+        snapshot.update(
+            {
+                "base_url": os.environ.get("IDCS_BASE_URL") or DEFAULT_BASE_URL,
+                "require_parameters": getattr(llm, "require_parameters", True),
+            }
+        )
+    return snapshot
+
+
 def _codex_config_args() -> list[str]:
     """Render optional Codex CLI config overrides for local benchmark calls."""
     args: list[str] = []

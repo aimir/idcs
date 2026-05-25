@@ -18,7 +18,7 @@ from idcs.benchmark.scoring import FailureExample, ScoreResult, score, score_det
 from idcs.coder import Coder
 from idcs.distinguisher import Distinguisher
 from idcs.generator import Generator
-from idcs.llm import BudgetExceededError, LLMClient
+from idcs.llm import BudgetExceededError, LLMClient, runtime_snapshot
 from idcs.optimizer.mutate import Mutator
 from idcs.optimizer.population import Population, PromptCandidate
 from idcs.orchestrator import run_episode
@@ -286,11 +286,20 @@ def _write_config_snapshot(
     are uninterpretable a week later.
     """
     main_model = getattr(llm, "model", None)
+    main_runtime = runtime_snapshot(llm)
+    mutator_runtime = (
+        runtime_snapshot(mutator_llm) if mutator_llm is not None else main_runtime
+    )
     snapshot = {
         "model": main_model,
         "mutator_model": (
             getattr(mutator_llm, "model", None) if mutator_llm is not None else main_model
         ),
+        "backend": main_runtime["backend"],
+        "runtime": {
+            "main": main_runtime,
+            "mutator": mutator_runtime,
+        },
         "weights": dataclasses.asdict(weights),
         "config": dataclasses.asdict(config),
         "train_task_ids": [t.id for t in train_tasks],

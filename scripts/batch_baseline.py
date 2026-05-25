@@ -48,7 +48,7 @@ from idcs.benchmark.tasks import (  # noqa: E402
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
-from idcs.llm import LLM  # noqa: E402
+from idcs.llm import LLM, runtime_snapshot  # noqa: E402
 from idcs.orchestrator import run_episode  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
 from idcs.user_proxy import NullUserProxy  # noqa: E402
@@ -310,12 +310,15 @@ def main(argv: list[str]) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     results_path = run_dir / "results.jsonl"
     summary_path = run_dir / "summary.json"
+    runtime = runtime_snapshot()
     meta = {
         "dataset": args.dataset,
         "task_count": len(tasks),
         "workers": args.workers,
         "retries": args.retries,
         "max_turns": args.max_turns,
+        **runtime,
+        "runtime": runtime,
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "generator_prompt_file": str(args.generator_prompt_file)
         if args.generator_prompt_file

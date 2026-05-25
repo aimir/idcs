@@ -41,7 +41,7 @@ from idcs.benchmark.tasks import (  # noqa: E402
     load_benchmark_tasks,
 )
 from idcs.coder import Coder  # noqa: E402
-from idcs.llm import LLM  # noqa: E402
+from idcs.llm import LLM, runtime_snapshot  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
 
 
@@ -210,10 +210,13 @@ def main(argv: list[str]) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     results_path = run_dir / "results.jsonl"
     summary_path = run_dir / "summary.json"
+    runtime = runtime_snapshot()
     meta = {
         "dataset": args.dataset,
         "task_count": len(tasks),
         "workers": args.workers,
+        **runtime,
+        "runtime": runtime,
         "started_at": datetime.now().isoformat(timespec="seconds"),
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
