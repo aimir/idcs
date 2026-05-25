@@ -72,18 +72,6 @@ HARD_MBPP_EXTENDED_IDS: tuple[str, ...] = (
     *HARD_MBPP_TEST_IDS,
 )
 
-HUMANEVAL_PLUS_FOLLOWUP_IDS: tuple[str, ...] = (
-    "HumanEval/125",
-    "HumanEval/126",
-    "HumanEval/99",
-    "HumanEval/124",
-    "HumanEval/26",
-    "HumanEval/95",
-    "HumanEval/134",
-    "HumanEval/68",
-)
-
-
 def load_mbpp_plus(
     *,
     task_ids: Sequence[str] | None = None,
@@ -146,7 +134,7 @@ def load_benchmark_tasks(
 ) -> list[Task]:
     """Load a named benchmark dataset used by the scripts."""
     if dataset in {"mbpp", MBPP_PLUS_DATASET}:
-        return load_mbpp_plus()
+        return load_mbpp_plus(max_plus_inputs=max_plus_inputs)
     if dataset in {
         HARD_DATASET,
         HARD_EXTENDED_DATASET,

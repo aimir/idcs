@@ -233,24 +233,22 @@ class LLM:
         if self.backend == CODEX_BACKEND:
             # Codex has no structured-output API; we always parse JSON from
             # text. Record it so telemetry reflects that every codex typed
-            # call is on the fallback path.
+            # call is on the fallback path. Parsing goes through the repair
+            # helper so a single malformed response can be retried with a
+            # corrective follow-up before we give up.
             self._record_structured_fallback(output_type.__name__, "codex_backend")
             raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-            return _parse_json_response(raw, output_type)
+            return self._parse_typed_with_repair(
+                system,
+                augmented_user,
+                raw,
+                output_type,
+                max_tokens=max_tokens,
+            )
 
         fallback_reason: str | None = None
         calls_before_parse = self.calls_made
         try:
-            if self.backend == CODEX_BACKEND:
-                raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-                return self._parse_typed_with_repair(
-                    system,
-                    augmented_user,
-                    raw,
-                    output_type,
-                    max_tokens=max_tokens,
-                )
-
             if self.client is None:
                 raise RuntimeError("OpenAI-compatible backend was not initialized.")
             client = self.client
@@ -303,7 +301,6 @@ class LLM:
             last_error = str(exc)
 
         for _ in range(JSON_REPAIR_ATTEMPTS):
-            self._record_structured_fallback(output_type.__name__, "json_repair")
             repair_user = _json_repair_prompt(
                 original_user,
                 last_raw,
@@ -314,6 +311,11 @@ class LLM:
             try:
                 return _parse_json_response(repaired, output_type)
             except RuntimeError as exc:
+                # Only count a repair attempt against the fallback metric if
+                # the repair itself failed to parse. Successful repairs are
+                # not re-counted — the initial backend record already covered
+                # the fact that we left the structured-output path.
+                self._record_structured_fallback(output_type.__name__, "json_repair")
                 last_raw = repaired
                 last_error = str(exc)
 

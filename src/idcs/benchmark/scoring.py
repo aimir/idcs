@@ -175,28 +175,6 @@ def _normalize_grader_outcome(
     return GraderOutcome(results=list(results), error=error)
 
 
-# Harness template: user code at module top level, then iterate inputs
-# and print pass/fail booleans behind a marker so we can find them
-# even if the user code itself prints to stdout.
-_HARNESS = '''\
-import math
-import sys
-
-# ----- USER CODE -----
-{code}
-# ----- END USER CODE -----
-
-# ``repr(float("inf"))`` is ``inf``. Define these names so EvalPlus cases
-# containing infinities remain valid Python literals inside this harness.
-inf = float("inf")
-nan = float("nan")
-
-_inputs = {inputs}
-_expected = {expected}
-_atol = {atol}
-_failure_limit = {failure_limit}
->>>>>>> 2ac6de3 (Feed hidden failures into prompt evolution)
-
 # Equality semantics shared between the in-process scorer harness here and
 # the standalone EvalPlus-style test bodies generated in ``tasks.py``.
 # Single source of truth — both consumers ``str.format``-substitute this.
@@ -231,6 +209,7 @@ import sys
 _inputs = {inputs}
 _expected = {expected}
 _atol = {atol}
+_failure_limit = {failure_limit}
 
 {equality_helper}
 

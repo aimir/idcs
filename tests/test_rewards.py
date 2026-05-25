@@ -199,8 +199,8 @@ def test_baseline_regression_penalizes_both_roles() -> None:
     """Candidates that lose hidden tests versus direct baseline are down-ranked."""
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=[])],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=[])],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0, regression_penalty_weight=2.0)
 
