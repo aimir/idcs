@@ -36,7 +36,15 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
-from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
@@ -86,6 +94,9 @@ def _score_payload(result: Any) -> dict[str, Any]:
         "pass_rate": result.pass_rate,
         "base_pass_rate": result.base_pass_rate,
         "errors": result.errors,
+        "failure_examples": [
+            asdict(example) for example in getattr(result, "failure_examples", [])
+        ],
         "passed_all": result.total_count > 0 and result.pass_count == result.total_count,
     }
 
@@ -257,7 +268,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset",
-        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        choices=[
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+        ],
         default=MBPP_PLUS_DATASET,
     )
     parser.add_argument("--workers", type=int, default=4)

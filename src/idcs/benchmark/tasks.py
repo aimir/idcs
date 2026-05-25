@@ -19,6 +19,10 @@ from idcs.schemas import Task, Test
 
 MBPP_PLUS_DATASET = "mbpp-plus"
 HARD_DATASET = "hard"
+HARD_EXTENDED_DATASET = "hard-extended"
+HARD_TRAIN_DATASET = "hard-train"
+HARD_DEV_DATASET = "hard-dev"
+HARD_TEST_DATASET = "hard-test"
 
 # Small MBPP+ slice chosen by direct-only probing for underspecified edge
 # semantics rather than algorithmic difficulty. These are tasks where
@@ -30,6 +34,47 @@ HARD_MBPP_PLUS_IDS: tuple[str, ...] = (
     "Mbpp/92",  # undulating means exactly two alternating digits, including short cases
     "Mbpp/597",  # kth merged element with empty arrays and mixed comparable values
 )
+
+# Generalization split. The original 5-task hard slice stays as the training
+# surface for prompt search. Dev/test are semantically similar but held out:
+# simple-looking tasks with exact edge semantics, not algorithm-heavy tasks.
+HARD_MBPP_TRAIN_IDS: tuple[str, ...] = HARD_MBPP_PLUS_IDS
+
+# Fresh held-out failures from a direct-only random MBPP+ probe with gpt-5.5
+# (seed=20260525, sample=60). These were not used by the hard-train prompt
+# search and are the current generalization surface.
+HARD_MBPP_DEV_IDS: tuple[str, ...] = (
+    "Mbpp/294",  # heterogeneous max should ignore non-integers
+    "Mbpp/137",  # zero/nonzero ratio with all-zero boundary
+    "Mbpp/265",  # every nth element split means S[i::n], not chunks
+    "Mbpp/301",  # dictionary depth recurses into nested dictionaries
+)
+
+HARD_MBPP_TEST_IDS: tuple[str, ...] = (
+    "Mbpp/785",  # tuple string parsing with ellipsis/spacing quirks
+    "Mbpp/451",  # only literal spaces are removed by canonical behavior
+    "Mbpp/757",  # reverse-pair counting without double counting
+    "Mbpp/576",  # sublist means subsequence, not contiguous slice
+    "Mbpp/765",  # nth polite number formula boundary
+)
+
+HARD_MBPP_EXTENDED_IDS: tuple[str, ...] = (
+    *HARD_MBPP_TRAIN_IDS,
+    *HARD_MBPP_DEV_IDS,
+    *HARD_MBPP_TEST_IDS,
+)
+
+HUMANEVAL_PLUS_FOLLOWUP_IDS: tuple[str, ...] = (
+    "HumanEval/125",
+    "HumanEval/126",
+    "HumanEval/99",
+    "HumanEval/124",
+    "HumanEval/26",
+    "HumanEval/95",
+    "HumanEval/134",
+    "HumanEval/68",
+)
+
 
 def load_mbpp_plus(
     *,
@@ -59,8 +104,28 @@ def load_mbpp_plus(
 
 def load_mbpp_hard(*, max_plus_inputs: int | None = None) -> list[Task]:
     """Return the named MBPP+ hard slice for spec-sensitivity experiments."""
+    return load_mbpp_hard_split(HARD_DATASET, max_plus_inputs=max_plus_inputs)
+
+
+def load_mbpp_hard_split(
+    dataset: str,
+    *,
+    max_plus_inputs: int | None = None,
+) -> list[Task]:
+    """Return a named MBPP+ hard split for generalization experiments."""
+    ids_by_dataset = {
+        HARD_DATASET: HARD_MBPP_PLUS_IDS,
+        HARD_EXTENDED_DATASET: HARD_MBPP_EXTENDED_IDS,
+        HARD_TRAIN_DATASET: HARD_MBPP_TRAIN_IDS,
+        HARD_DEV_DATASET: HARD_MBPP_DEV_IDS,
+        HARD_TEST_DATASET: HARD_MBPP_TEST_IDS,
+    }
+    try:
+        task_ids = ids_by_dataset[dataset]
+    except KeyError as exc:
+        raise ValueError(f"Unknown hard split {dataset!r}.") from exc
     return load_mbpp_plus(
-        task_ids=HARD_MBPP_PLUS_IDS,
+        task_ids=task_ids,
         include_evalplus_tests=True,
         max_plus_inputs=max_plus_inputs,
     )
@@ -73,11 +138,17 @@ def load_benchmark_tasks(
 ) -> list[Task]:
     """Load a named benchmark dataset used by the scripts."""
     if dataset in {"mbpp", MBPP_PLUS_DATASET}:
-        return load_mbpp_plus(max_plus_inputs=max_plus_inputs)
-    if dataset == HARD_DATASET:
-        return load_mbpp_hard(max_plus_inputs=max_plus_inputs)
+        return load_mbpp_plus()
+    if dataset in {
+        HARD_DATASET,
+        HARD_EXTENDED_DATASET,
+        HARD_TRAIN_DATASET,
+        HARD_DEV_DATASET,
+        HARD_TEST_DATASET,
+    }:
+        return load_mbpp_hard_split(dataset, max_plus_inputs=max_plus_inputs)
     raise ValueError(
-        f"Unknown dataset {dataset!r}; expected '{MBPP_PLUS_DATASET}' or '{HARD_DATASET}'."
+        f"Unknown dataset {dataset!r}; expected '{MBPP_PLUS_DATASET}' or a hard split."
     )
 
 

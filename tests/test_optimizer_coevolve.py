@@ -9,13 +9,15 @@ from idcs.benchmark.scoring import FailureExample, ScoreResult
 from idcs.optimizer.coevolve import (
     CoevolveConfig,
     _evaluate_candidate,
+    _format_failure_context,
     _format_failure_summaries,
+    _select_elites,
     _summarize_feedback,
     coevolve,
 )
 from idcs.optimizer.population import Population, PromptCandidate
 from idcs.rewards import RewardWeights
-from idcs.schemas import Issue, IssueList, RewardBreakdown, Spec, Task, Test
+from idcs.schemas import Issue, IssueList, RewardBreakdown, Spec, Task, Test, Trace, Turn
 from tests.fakes import FakeLLM, FakeUserProxy
 
 
@@ -280,6 +282,168 @@ def test_mutation_feedback_includes_delta_and_regression_terms() -> None:
     assert "Turn these into reusable semantic rules" in feedback
 
 
+def test_mutation_feedback_can_include_peer_elite_lessons() -> None:
+    candidate = PromptCandidate(
+        prompt="generator prompt",
+        breakdowns=[RewardBreakdown(benchmark_score=0.5, r_generator=0.5)],
+    )
+    peer = PromptCandidate(
+        prompt="peer prompt",
+        reward=0.8,
+        frontier_task_ids=["Mbpp/459"],
+        failure_summaries=["Mbpp/459: plus score 25/103; expected lowercase only"],
+    )
+
+    feedback = _summarize_feedback(candidate, "generator", peer_elites=[candidate, peer])
+
+    assert "Complementary elite prompts also survived" in feedback
+    assert "Mbpp/459" in feedback
+    assert "Merge their reusable lessons" in feedback
+
+
+def test_task_pareto_elites_keep_complementary_specialists() -> None:
+    candidate_a = PromptCandidate(
+        prompt="excellent on task zero",
+        reward=0.5,
+        task_ids=["task/0", "task/1"],
+        breakdowns=[
+            RewardBreakdown(benchmark_score=1.0, r_generator=1.0),
+            RewardBreakdown(benchmark_score=0.0, r_generator=0.0),
+        ],
+    )
+    candidate_b = PromptCandidate(
+        prompt="excellent on task one",
+        reward=0.5,
+        task_ids=["task/0", "task/1"],
+        breakdowns=[
+            RewardBreakdown(benchmark_score=0.0, r_generator=0.0),
+            RewardBreakdown(benchmark_score=1.0, r_generator=1.0),
+        ],
+    )
+    average_winner = PromptCandidate(
+        prompt="smooth average prompt",
+        reward=0.7,
+        task_ids=["task/0", "task/1"],
+        breakdowns=[
+            RewardBreakdown(benchmark_score=0.7, r_generator=0.7),
+            RewardBreakdown(benchmark_score=0.7, r_generator=0.7),
+        ],
+    )
+
+    elites = _select_elites(
+        Population([average_winner, candidate_a, candidate_b]),
+        role="generator",
+        config=CoevolveConfig(
+            population_size=3,
+            elite_size=2,
+            elite_selection="task_pareto",
+        ),
+    )
+
+    assert {candidate.prompt for candidate in elites} == {
+        "excellent on task zero",
+        "excellent on task one",
+    }
+    assert candidate_a.frontier_task_ids == ["task/0"]
+    assert candidate_b.frontier_task_ids == ["task/1"]
+    assert average_winner.frontier_task_ids == []
+
+
+def test_distinguisher_pareto_tie_break_prefers_non_invasive_critique() -> None:
+    noisy = PromptCandidate(
+        prompt="noisy distinguisher",
+        reward=0.9,
+        task_ids=["task/0"],
+        breakdowns=[
+            RewardBreakdown(
+                benchmark_score=1.0,
+                r_distinguisher=0.9,
+                type1_count=3,
+                type2_count=2,
+            )
+        ],
+    )
+    quiet = PromptCandidate(
+        prompt="quiet distinguisher",
+        reward=0.4,
+        task_ids=["task/0"],
+        breakdowns=[
+            RewardBreakdown(
+                benchmark_score=1.0,
+                r_distinguisher=0.4,
+                type1_count=0,
+                type2_count=0,
+            )
+        ],
+    )
+
+    elites = _select_elites(
+        Population([noisy, quiet]),
+        role="distinguisher",
+        config=CoevolveConfig(
+            population_size=3,
+            elite_size=1,
+            elite_selection="task_pareto",
+            keep_anchor=False,
+        ),
+    )
+
+    assert [candidate.prompt for candidate in elites] == ["quiet distinguisher"]
+
+
+def test_mean_elites_keep_average_reward_behavior() -> None:
+    pop = Population(
+        [
+            PromptCandidate(prompt="low", reward=0.1),
+            PromptCandidate(prompt="high", reward=0.9),
+        ]
+    )
+
+    elites = _select_elites(
+        pop,
+        role="generator",
+        config=CoevolveConfig(population_size=3, elite_size=1, elite_selection="mean"),
+    )
+
+    assert [candidate.prompt for candidate in elites] == ["high"]
+
+
+def test_elite_selection_retains_anchor_prompt() -> None:
+    anchor = PromptCandidate(prompt="base prompt", reward=0.0, anchor=True)
+    specialist_a = PromptCandidate(
+        prompt="specialist a",
+        reward=0.5,
+        task_ids=["task/0", "task/1"],
+        breakdowns=[
+            RewardBreakdown(benchmark_score=1.0, r_generator=1.0),
+            RewardBreakdown(benchmark_score=0.0, r_generator=0.0),
+        ],
+    )
+    specialist_b = PromptCandidate(
+        prompt="specialist b",
+        reward=0.4,
+        task_ids=["task/0", "task/1"],
+        breakdowns=[
+            RewardBreakdown(benchmark_score=0.0, r_generator=0.0),
+            RewardBreakdown(benchmark_score=1.0, r_generator=1.0),
+        ],
+    )
+
+    elites = _select_elites(
+        Population([anchor, specialist_a, specialist_b]),
+        role="generator",
+        config=CoevolveConfig(
+            population_size=3,
+            elite_size=1,
+            elite_selection="task_pareto",
+            keep_anchor=True,
+        ),
+    )
+
+    assert anchor in elites
+    assert len(elites) == 2
+
+
 def test_failure_summary_adds_string_filter_hint() -> None:
     task = Task(id="Mbpp/459", prompt="", entry_point="remove_uppercase", tests=[])
     result = ScoreResult(
@@ -300,3 +464,36 @@ def test_failure_summary_adds_string_filter_hint() -> None:
     assert "expected is a filtered subsequence of actual" in summary
     assert "expected contains only lowercase alphabetic characters" in summary
     assert "actual preserved punctuation/symbols absent from expected" in summary
+
+
+def test_failure_context_includes_compact_spec_and_d_issues() -> None:
+    task = Task(
+        id="Mbpp/context",
+        prompt="Return the first matching item with exact boundary behavior.",
+        entry_point="find_item",
+        tests=[],
+    )
+    issue = Issue(
+        kind="underconstraint",
+        route="generator",
+        location="postconditions[0]",
+        description="Tie behavior is not explicit.",
+    )
+    trace = Trace(
+        task_id=task.id,
+        turns=[Turn(spec=_spec("Draft spec"), issues=[issue])],
+        final_spec=Spec(
+            goal="Find a matching item.",
+            postconditions=["Return the leftmost matching item when duplicates exist."],
+            edge_cases=["Empty input returns None."],
+            acceptance_criteria=["Duplicates choose the first occurrence."],
+        ),
+    )
+    result = ScoreResult(pass_count=1, total_count=2, pass_rate=0.5)
+
+    context = _format_failure_context(task, trace, result)
+
+    assert context is not None
+    assert "task_prompt='Return the first matching item" in context
+    assert "Return the leftmost matching item" in context
+    assert "generator/underconstraint" in context
