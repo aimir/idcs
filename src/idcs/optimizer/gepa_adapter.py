@@ -109,6 +109,10 @@ class IDCSGepaAdapter:
     generator_prompt: str
     distinguisher_prompt: str
     coder_prompt: str | None = None
+    generator_llm: LLMClient | None = None
+    distinguisher_llm: LLMClient | None = None
+    coder_llm: LLMClient | None = None
+    mutator_llm: LLMClient | None = None
     user_factory: Callable[[Task], UserProxy] = default_user_factory
     weights: RewardWeights = field(default_factory=RewardWeights)
     baseline_scores: Mapping[str, float] = field(default_factory=dict)
@@ -185,7 +189,7 @@ class IDCSGepaAdapter:
         method only proposes replacement text for the requested components.
         """
 
-        mutator = Mutator(self.llm)
+        mutator = Mutator(self.mutator_llm or self.llm)
         proposed: dict[str, str] = {}
         for component in components_to_update:
             current_text = candidate.get(component)
@@ -229,12 +233,16 @@ class IDCSGepaAdapter:
             allow_missing=True,
         )
 
-        generator = Generator(self.llm, prompt=generator_prompt)
-        distinguisher = Distinguisher(self.llm, prompt=distinguisher_prompt)
+        generator = Generator(self.generator_llm or self.llm, prompt=generator_prompt)
+        distinguisher = Distinguisher(
+            self.distinguisher_llm or self.llm,
+            prompt=distinguisher_prompt,
+        )
+        active_coder_llm = self.coder_llm or self.llm
         coder = (
-            Coder(self.llm, prompt=coder_prompt)
+            Coder(active_coder_llm, prompt=coder_prompt)
             if coder_prompt is not None
-            else Coder(self.llm)
+            else Coder(active_coder_llm)
         )
 
         try:

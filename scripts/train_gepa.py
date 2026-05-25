@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    llm = LLM(model=args.model, max_calls=args.max_llm_calls)
+    role_llms = _make_role_llms(args)
     generator_prompt = _read_prompt(args.generator_prompt_file, "generator_v0")
     distinguisher_prompt = _read_prompt(args.distinguisher_prompt_file, "distinguisher_v0")
     coder_prompt = (
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         else None
     )
 
-    tasks, user_factory = _load_tasks(args, llm)
+    tasks, user_factory = _load_tasks(args, role_llms["generator"])
     if not tasks:
         print("No tasks selected.", file=sys.stderr)
         return 1
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Computing {len(baseline_tasks)} direct baselines...")
         baselines = compute_direct_baselines(
             baseline_tasks,
-            llm,
+            role_llms["coder"],
             coder_prompt=coder_prompt,
         )
 
@@ -103,14 +103,18 @@ def main(argv: list[str] | None = None) -> int:
         tasks=tasks,
         val_tasks=val_tasks,
         baselines=baselines,
-        model=llm.model,
+        models=_role_models(role_llms),
     )
 
     adapter = IDCSGepaAdapter(
-        llm=llm,
+        llm=role_llms["generator"],
         generator_prompt=generator_prompt,
         distinguisher_prompt=distinguisher_prompt,
         coder_prompt=coder_prompt,
+        generator_llm=role_llms["generator"],
+        distinguisher_llm=role_llms["distinguisher"],
+        coder_llm=role_llms["coder"],
+        mutator_llm=role_llms["mutator"],
         user_factory=user_factory,
         baseline_scores=baselines,
         max_turns=args.max_turns,
@@ -140,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except BudgetExceededError as exc:
         print(f"\nBUDGET EXHAUSTED: {exc}", file=sys.stderr)
-        print(f"LLM calls used: {llm.calls_made}", file=sys.stderr)
+        print(f"LLM calls used: {_total_calls(role_llms)}", file=sys.stderr)
         return 3
 
     summary = {
@@ -150,7 +154,9 @@ def main(argv: list[str] | None = None) -> int:
         "total_metric_calls": result.total_metric_calls,
         "num_full_val_evals": result.num_full_val_evals,
         "val_aggregate_scores": result.val_aggregate_scores,
-        "llm_calls_used": llm.calls_made,
+        "llm_calls_used": _total_calls(role_llms),
+        "llm_calls_by_role": _role_call_counts(role_llms),
+        "models_by_role": _role_models(role_llms),
         "gepa_run_dir": result.run_dir,
     }
     (run_dir / "summary.json").write_text(
@@ -161,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Best candidate index: {result.best_idx}")
     print(f"Candidates: {result.num_candidates}")
     print(f"Metric calls: {result.total_metric_calls}")
-    print(f"LLM calls used: {llm.calls_made}")
+    print(f"LLM calls used: {_total_calls(role_llms)}")
     return 0
 
 
@@ -185,6 +191,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="Override the IDCS G/D/coder model.",
     )
+    parser.add_argument(
+        "--planner-model",
+        type=str,
+        default=None,
+        help="Use one model for generator, distinguisher, and mutator.",
+    )
+    parser.add_argument("--generator-model", type=str, default=None)
+    parser.add_argument("--distinguisher-model", type=str, default=None)
+    parser.add_argument("--mutator-model", type=str, default=None)
+    parser.add_argument("--coder-model", type=str, default=None)
     parser.add_argument("--reflection-model", type=str, default=None, help="GEPA reflection LM.")
     parser.add_argument("--max-llm-calls", type=int, default=None)
     parser.add_argument("--max-metric-calls", type=int, default=25)
@@ -208,6 +224,37 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
     parser.add_argument("--coder-prompt-file", type=Path, default=None)
     return parser.parse_args(argv)
+
+
+def _make_role_llms(args: argparse.Namespace) -> dict[str, LLM]:
+    planner_model = args.planner_model or args.model
+    role_models = {
+        "generator": args.generator_model or planner_model,
+        "distinguisher": args.distinguisher_model or planner_model,
+        "mutator": args.mutator_model or planner_model,
+        "coder": args.coder_model or args.model,
+    }
+    llms_by_model: dict[str, LLM] = {}
+    role_llms: dict[str, LLM] = {}
+    for role, model in role_models.items():
+        key = model or "__default__"
+        if key not in llms_by_model:
+            llms_by_model[key] = LLM(model=model, max_calls=args.max_llm_calls)
+        role_llms[role] = llms_by_model[key]
+    return role_llms
+
+
+def _role_models(role_llms: Mapping[str, LLM]) -> dict[str, str]:
+    return {role: llm.model for role, llm in role_llms.items()}
+
+
+def _role_call_counts(role_llms: Mapping[str, LLM]) -> dict[str, int]:
+    return {role: llm.calls_made for role, llm in role_llms.items()}
+
+
+def _total_calls(role_llms: Mapping[str, LLM]) -> int:
+    unique_llms = {id(llm): llm for llm in role_llms.values()}
+    return sum(llm.calls_made for llm in unique_llms.values())
 
 
 def _read_prompt(path: Path | None, default_name: str) -> str:
@@ -264,11 +311,11 @@ def _write_invocation(
     tasks: Sequence[Task],
     val_tasks: Sequence[Task],
     baselines: Mapping[str, float],
-    model: str,
+    models: Mapping[str, str],
 ) -> None:
     payload: dict[str, Any] = {
         "args": vars(args),
-        "model": model,
+        "models_by_role": dict(models),
         "train_task_ids": [task.id for task in tasks],
         "val_task_ids": [task.id for task in val_tasks],
         "baselines": dict(baselines),

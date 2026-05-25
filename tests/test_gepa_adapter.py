@@ -125,6 +125,38 @@ def test_reflective_dataset_contains_component_specific_feedback() -> None:
     assert "distinguisher" in distinguisher_record["Component-specific guidance"]
 
 
+def test_adapter_uses_role_specific_llms_for_evaluation() -> None:
+    task = _task()
+    fallback_llm = FakeLLM()
+    generator_llm = FakeLLM(typed_responses=[_spec()])
+    distinguisher_llm = FakeLLM(typed_responses=[IssueList(issues=[])])
+    coder_llm = FakeLLM(text_responses=["def add(a, b):\n    return a + b\n"])
+    adapter = IDCSGepaAdapter(
+        llm=fallback_llm,
+        generator_llm=generator_llm,
+        distinguisher_llm=distinguisher_llm,
+        coder_llm=coder_llm,
+        generator_prompt="generator seed",
+        distinguisher_prompt="distinguisher seed",
+        max_turns=1,
+    )
+    candidate = seed_candidate(
+        generator_prompt="generator candidate",
+        distinguisher_prompt="distinguisher candidate",
+    )
+
+    batch = adapter.evaluate([task], candidate, capture_traces=True)
+
+    assert batch.scores == [1.0]
+    assert len(generator_llm.typed_calls) == 1
+    assert generator_llm.typed_calls[0][0] == "generator candidate"
+    assert len(distinguisher_llm.typed_calls) == 1
+    assert distinguisher_llm.typed_calls[0][0] == "distinguisher candidate"
+    assert len(coder_llm.text_calls) == 1
+    assert fallback_llm.typed_calls == []
+    assert fallback_llm.text_calls == []
+
+
 def test_compute_direct_baselines_scores_prompt_path() -> None:
     task = _task()
     llm = FakeLLM(text_responses=["def add(a, b):\n    return a + b\n"])
@@ -136,13 +168,15 @@ def test_compute_direct_baselines_scores_prompt_path() -> None:
 
 
 def test_adapter_proposes_new_texts_with_existing_mutator() -> None:
-    llm = FakeLLM(
+    fallback_llm = FakeLLM()
+    mutator_llm = FakeLLM(
         typed_responder=lambda system, user, output_type: output_type(
             prompts=["# Generator improved\n\nWrite edge cases explicitly."]
         )
     )
     adapter = IDCSGepaAdapter(
-        llm=llm,
+        llm=fallback_llm,
+        mutator_llm=mutator_llm,
         generator_prompt="generator seed",
         distinguisher_prompt="distinguisher seed",
     )
@@ -163,8 +197,9 @@ def test_adapter_proposes_new_texts_with_existing_mutator() -> None:
     assert proposed == {
         GENERATOR_COMPONENT: "# Generator improved\n\nWrite edge cases explicitly."
     }
-    assert len(llm.typed_calls) == 1
-    assert "ROLE: generator" in llm.typed_calls[0][1]
-    assert "GEPA selected generator_prompt" in llm.typed_calls[0][1]
-    assert "High-signal summary" in llm.typed_calls[0][1]
-    assert "expected lowercase only" in llm.typed_calls[0][1]
+    assert len(mutator_llm.typed_calls) == 1
+    assert "ROLE: generator" in mutator_llm.typed_calls[0][1]
+    assert "GEPA selected generator_prompt" in mutator_llm.typed_calls[0][1]
+    assert "High-signal summary" in mutator_llm.typed_calls[0][1]
+    assert "expected lowercase only" in mutator_llm.typed_calls[0][1]
+    assert fallback_llm.typed_calls == []
