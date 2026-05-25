@@ -14,17 +14,18 @@ def create_run_dir(root: Path | None = None) -> Path:
     base = root or (Path(__file__).resolve().parents[2] / "experiments" / "runs")
     base.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    run_dir = base / timestamp
-    if not run_dir.exists():
-        run_dir.mkdir()
-        return run_dir
-    counter = 1
+    # Use mkdir(exist_ok=False) so directory creation is atomic; two runs
+    # started in the same second from concurrent processes race-safely fall
+    # through to the suffix loop instead of one of them throwing.
+    candidate = base / timestamp
+    counter = 0
     while True:
-        candidate = base / f"{timestamp}-{counter}"
-        if not candidate.exists():
-            candidate.mkdir()
+        try:
+            candidate.mkdir(exist_ok=False)
             return candidate
-        counter += 1
+        except FileExistsError:
+            counter += 1
+            candidate = base / f"{timestamp}-{counter}"
 
 
 def write_trace(run_dir: Path, trace: Trace) -> None:

@@ -43,7 +43,11 @@ def compute_reward_breakdown(
                 type1_count += 1
             else:
                 type2_count += 1
-                if issue.location not in turn.user_answers:
+                # Only count as dismissed when the issue was actually askable.
+                # A route="user" issue without a suggested_question can't be
+                # routed to the user-proxy in run_episode, so penalizing D for
+                # the missing answer would be unfair.
+                if issue.suggested_question and issue.location not in turn.user_answers:
                     type2_dismissed_count += 1
 
     type1_fixed_count = _count_type1_fixed(trace)

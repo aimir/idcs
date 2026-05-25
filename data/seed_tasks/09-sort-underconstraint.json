@@ -22,14 +22,15 @@
     "preconditions": [],
     "postconditions": [
       "result is sorted in non-decreasing order: result[i] <= result[i+1] for all valid i",
-      "result is a permutation of lst (same elements, same counts)"
+      "result is a permutation of lst (same elements, same counts)",
+      "result is a newly-allocated list; the input lst is not mutated and is not returned as the same object"
     ],
     "invariants": [],
     "edge_cases": [
-      "empty list returns empty list",
-      "single-element list returns itself",
+      "empty list returns a new empty list",
+      "single-element list returns a new list with the same element",
       "list with duplicates preserves all copies",
-      "already-sorted input is returned unchanged"
+      "already-sorted input returns a new list with the same elements in the same order"
     ],
     "acceptance_criteria": [
       "result == sorted(lst)"

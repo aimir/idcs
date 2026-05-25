@@ -44,6 +44,24 @@ def test_type2_dismissed_counts() -> None:
     assert breakdown.type2_dismissed_count == 1
 
 
+def test_type2_dismissed_skips_unaskable_issues() -> None:
+    """A route=user issue without a suggested_question can't be asked, so it
+    must not count as 'dismissed' — that would penalize D for D's own
+    schema-allowed omission rather than for the user-proxy's silence."""
+    issue = Issue(
+        kind="ambiguity",
+        route="user",
+        location="goal",
+        description="needs clarification",
+        suggested_question=None,
+    )
+    trace = Trace(task_id="t", turns=[Turn(spec=_spec(), issues=[issue], user_answers={})])
+    weights = RewardWeights(min_spec_ratio=0.0)
+    breakdown = compute_reward_breakdown(trace, "prompt", benchmark_score=0.0, weights=weights)
+    assert breakdown.type2_count == 1
+    assert breakdown.type2_dismissed_count == 0
+
+
 def test_spec_complexity_penalty_handles_missing_spec() -> None:
     penalty = compute_spec_complexity_penalty(None, "prompt", min_ratio=0.9)
     assert penalty == 1.0
