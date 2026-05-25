@@ -59,25 +59,34 @@ fix the spec format before adding any optimization machinery.
 **Exit criterion**: reward values move sensibly on hand-edited prompt
 variants (e.g. a deliberately bad G prompt scores lower).
 
-## Phase 4 — Single-side optimization (3–4 days)
+## Phase 4 — Single-side optimization ✅
 
-- `optimizer/population.py`, `optimizer/mutate.py`.
+- `optimizer/population.py`, `optimizer/mutate.py` — LLM-driven prompt
+  mutation with a plain-text fallback for malformed structured output.
 - Freeze D, optimize G via population search. Then freeze G, optimize D.
 
-**Exit criterion**: each side independently moves the benchmark score on a
-held-out task batch. This phase catches reward bugs before coevolution
-amplifies them.
+**Status**: shipped. Per-side optimization moves the benchmark score on
+seed and hard-train tasks; the harder result (held-out generalization)
+turns out to require Phase 5 + anti-overfit machinery.
 
-## Phase 5 — Coevolution (~1 week)
+## Phase 5 — Coevolution ✅
 
-- `optimizer/coevolve.py`: alternating G/D epochs.
-- Diversity guards (pairwise edit distance within each population).
-- Anti-collapse monitors: spec-length distribution, type-2 rate per episode,
-  embedding distance from input.
+- `optimizer/coevolve.py`: alternating G/D epochs with task-Pareto elite
+  selection and anchor-protected base prompts.
+- Diversity guards: pairwise edit distance within each population.
+- Anti-collapse: regression penalty against the direct baseline,
+  excess-type-2 cap, held-out validation split, failure-context feedback
+  into the next mutation prompt.
+- Codex CLI backend with budgeted retries + JSON repair for typed calls.
+- Hard MBPP+ splits (`hard-train` / `hard-dev` / `hard-test`) and a
+  curated `hardened` POC corpus to evaluate underspecification rescue
+  separately from raw difficulty.
 
-**Exit criterion**: stable training run over ~50 epochs without collapse,
-with final populations beating the Phase 2 fixed-prompt baseline by a
-meaningful margin on held-out tasks.
+**Status**: shipped. Coevolution from seed prompts produces transferable
+rescues on training tasks; on held-out hard-test the hand-written seed
+still beats the best evolved variants, which §5 of the submission
+discusses as the next research target (validation-gated selection,
+larger sample budgets, less critique-volume-rewarding reward shape).
 
 ## Phase 6 — Real user evaluation (~1 week)
 

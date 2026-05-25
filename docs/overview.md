@@ -63,6 +63,27 @@ the adversarial shaping terms.
 
 ## Status
 
-This document captures the design intent. Implementation proceeds in
-phases — see `plan.md`. Both documents are expected to evolve as we learn
-from real traces.
+Implementation matches the design through `plan.md` Phase 5. What's live today:
+
+- **Pipeline**: generator, distinguisher, oracle user-proxy, coder,
+  orchestrator. Per-trace structured telemetry with prompt hashes and
+  config snapshot.
+- **Benchmarks**: EvalPlus / MBPP+ adapter with `plus_input` scoring;
+  hard-train / hard-dev / hard-test splits for held-out generalization;
+  a curated `hardened` POC corpus separating underspecification rescue
+  from raw difficulty.
+- **LLM backends**: OpenRouter (default), OpenAI, and a local Codex CLI
+  backend with budgeted retries, exponential backoff, JSON-repair retry
+  for malformed structured output, and budget-safe error semantics.
+- **Optimizer**: population-based G/D coevolution with anchor-protected
+  base prompt, task-Pareto elite selection, diversity guard, plain-text
+  mutator fallback, anti-regression penalty against the direct baseline,
+  and held-out validation split.
+- **Findings**: the hand-written spec-guided pipeline raises hidden-test
+  pass rate 73.3% → 96.2% on a held-out hard-test split; the diagnostic
+  hand-rules ceiling reaches 100% on the original 5-task hard slice;
+  coevolved prompts transfer to training tasks but not yet to the
+  held-out split. See `apart-hackathon-submission.md` for the full
+  evidence ledger.
+
+What's not yet built: real-user evaluation (`plan.md` Phase 6).

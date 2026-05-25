@@ -65,29 +65,30 @@ learns to extract gold-level information for free.
 
 ## Reward structure
 
-Three terms per side, with the benchmark dominant:
+Benchmark dominant; per-role terms with shared anti-regression and excess-clarification penalties (`src/idcs/rewards.py`):
 
 ```
 R_G = α · benchmark_score
     − β · count(type1_issues_raised_against_G)
-    − γ · spec_complexity_penalty       # discourages echo-the-input collapse
+    − γ · spec_complexity_penalty                  # discourages echo-the-input collapse
+    − ρ · regression_penalty                       # vs direct baseline (see below)
 
 R_D = α · benchmark_score
-    + β · count(type1_issues_G_actually_fixed)    # only credit accepted rejects
+    + β · count(type1_issues_G_actually_fixed)     # only credit accepted rejects
     + δ · useful_clarification_rate                # see below
     − ε · count(type2_issues_user_dismissed)
+    − ζ · max(0, type2_count − max_type2_per_episode)   # cap on type-2 spam
+    − ρ · regression_penalty
 
 useful_clarification_rate =
-    Σ (Δ benchmark_score attributable to question q) / (number of type-2 questions asked)
+    (benchmark_score − direct_baseline) / max(1, number of type-2 questions asked)
+
+regression_penalty = max(0, direct_baseline − benchmark_score)   # only positive when spec-guided loses
 ```
 
-**Attribution** is the tricky bit: run a counterfactual episode where the
-type-2 issue is dropped and measure the benchmark delta. Expensive, but only
-needed offline during training and cacheable per (task, issue).
+The **clarification rate** is computed cheaply from the per-task direct baseline rather than via counterfactual reruns — coevolution iterations need this signal hundreds of times per epoch. The **regression penalty** symmetrically penalizes both roles when a spec-guided run loses hidden tests relative to the direct baseline, so coevolution can't trade one rescued task for broad partial regressions elsewhere. The **type-2 cap** penalizes on the cap rather than the average, so a 6th question can't be made profitable by being only slightly useful.
 
-**Suggested scale**: `α` should be 5–10× the other coefficients. The
-`spec_complexity_penalty` only kicks in at the extremes (penalize if spec
-length < input length, or embedding distance to input below a threshold).
+**Suggested scale** (current defaults): `α=1.0`, `β=0.1`, `γ=0.05`, `δ=0.1`, `ε=0.05`, `ζ=1.0`, `ρ=2.0`. The regression penalty is intentionally aggressive: a −0.1 hidden-test delta erases a full task pass.
 
 ## Optimization
 
@@ -110,7 +111,7 @@ idcs/
   pyproject.toml
   src/idcs/
     schemas.py              # pydantic models above
-    llm.py                  # Anthropic SDK wrapper, prompt caching enabled
+    llm.py                  # OpenAI-SDK wrapper; OpenRouter / OpenAI / local codex backends
     generator.py            # G.draft(task) and G.revise(spec, issues, answers)
     distinguisher.py        # D.critique(task, spec) -> list[Issue]
     user_proxy.py           # Oracle / human dispatcher
@@ -121,10 +122,10 @@ idcs/
       scoring.py            # thin wrapper around the library's grader call
     rewards.py              # compute R_G, R_D from Trace
     optimizer/
-      population.py
-      mutate.py             # LLM-driven prompt mutation
-      coevolve.py           # outer training loop
-      attribution.py        # counterfactual rerun for type-2 credit
+      population.py         # candidate populations with diversity guard
+      mutate.py             # LLM-driven prompt mutation w/ plain-text fallback
+      coevolve.py           # outer training loop, task-Pareto elite selection,
+                            # anchor protection, held-out val split
     telemetry.py            # structured logging of every turn
   prompts/
     generator_v0.md
@@ -147,6 +148,10 @@ idcs/
 
 Two modules deserve attention and are easy to underestimate:
 
-- `attribution.py`: counterfactual reruns for type-2 credit assignment.
-- `telemetry.py`: complete structured traces. You cannot debug coevolution
+- `optimizer/coevolve.py`: task-Pareto elite selection, anchor-protected
+  base prompt, held-out validation split, and rich failure-context
+  feedback into the next mutation prompt. The pieces that prevent
+  coevolution from collapsing onto a single trick.
+- `telemetry.py`: complete structured traces with prompt hashes, config
+  snapshot, and per-turn issue routing. You cannot debug coevolution
   without them.
