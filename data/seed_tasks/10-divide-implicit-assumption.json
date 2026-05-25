@@ -1,0 +1,45 @@
+{
+  "task": {
+    "id": "vuln/10-divide-implicit-assumption",
+    "prompt": "Write a function `safe_divide(a, b)` that divides two numbers and returns the result as a float.",
+    "tests": [
+      {"id": "vuln/10/t0", "code": "assert safe_divide(10, 2) == 5.0"},
+      {"id": "vuln/10/t1", "code": "assert safe_divide(7, 3) == 7 / 3"},
+      {"id": "vuln/10/t2", "code": "assert safe_divide(-6, 2) == -3.0"},
+      {"id": "vuln/10/t3", "code": "assert safe_divide(0, 5) == 0.0"},
+      {"id": "vuln/10/t4", "code": "try:\n    safe_divide(1, 0)\n    assert False, 'should have raised'\nexcept ZeroDivisionError:\n    pass"},
+      {"id": "vuln/10/t5", "code": "assert safe_divide(1, -1) == -1.0"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return a / b as a float, raising ZeroDivisionError when b is zero.",
+    "inputs": [
+      {"name": "a", "type": "int | float", "description": "numerator", "constraints": []},
+      {"name": "b", "type": "int | float", "description": "denominator", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "float", "description": "a divided by b", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "result == a / b when b != 0",
+      "raises ZeroDivisionError when b == 0"
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "b is zero — must raise ZeroDivisionError",
+      "a is zero — returns 0.0",
+      "negative numbers",
+      "float inputs"
+    ],
+    "acceptance_criteria": [
+      "returns a / b for non-zero b",
+      "raises ZeroDivisionError for b == 0"
+    ]
+  },
+  "known_weakness": {
+    "type": "implicit_assumption",
+    "description": "The task says 'divides two numbers' without mentioning division by zero. A naive spec assumes b != 0 without stating it. The Distinguisher must surface the implicit assumption that b is non-zero and either add a precondition or specify error behavior.",
+    "naive_spec_gap": "no precondition or postcondition addressing b == 0"
+  }
+}

@@ -54,7 +54,14 @@ class Spec(BaseModel):
     acceptance_criteria: list[str] = PydField(default_factory=list)
 
 
-IssueKind = Literal["gap", "ambiguity", "contradiction", "over_constraint"]
+IssueKind = Literal[
+    "gap",
+    "ambiguity",
+    "contradiction",
+    "over_constraint",
+    "underconstraint",
+    "implicit_assumption",
+]
 IssueRoute = Literal["generator", "user"]
 
 
@@ -102,6 +109,11 @@ class Trace(BaseModel):
     final_spec: Spec | None = None
     benchmark_score: float = 0.0
     rewards: RewardBreakdown = PydField(default_factory=RewardBreakdown)
+    # Prompt fingerprints for cross-referencing traces ↔ candidates. Set by
+    # the optimizer when a candidate is evaluated; harmless on cold-start
+    # traces that don't come from a coevolution run.
+    generator_prompt_hash: str | None = None
+    distinguisher_prompt_hash: str | None = None
 
 
 class IssueList(BaseModel):

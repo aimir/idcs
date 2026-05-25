@@ -37,27 +37,9 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 MAX_RETRIES = 5
 
 
-def _with_retry(fn: Callable[[], T_ret], max_retries: int = MAX_RETRIES) -> T_ret:
-    """Call fn(), retrying on transient 429/5xx with exponential backoff."""
-    for attempt in range(max_retries + 1):
-        try:
-            return fn()
-        except openai.RateLimitError:
-            if attempt == max_retries:
-                raise
-            delay = (2**attempt) + random.uniform(0, 1)
-            log.warning("429 rate-limited, retry %d/%d in %.1fs", attempt + 1, max_retries, delay)
-            time.sleep(delay)
-        except openai.APIStatusError as e:
-            if e.status_code < 500 or attempt == max_retries:
-                raise
-            delay = (2**attempt) + random.uniform(0, 1)
-            log.warning(
-                "%d server error, retry %d/%d in %.1fs",
-                e.status_code, attempt + 1, max_retries, delay,
-            )
-            time.sleep(delay)
-    raise AssertionError("unreachable")
+class BudgetExceededError(RuntimeError):
+    """Raised when an ``LLM`` instance has hit its ``max_calls`` ceiling."""
+
 
 T = TypeVar("T", bound=BaseModel)
 T_ret = TypeVar("T_ret")
@@ -101,6 +83,7 @@ class LLM:
         api_key: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
         require_parameters: bool = True,
+        max_calls: int | None = None,
     ) -> None:
         self.client = openai.OpenAI(
             api_key=api_key or os.environ.get("OPENROUTER_API_KEY"),
@@ -108,6 +91,53 @@ class LLM:
         )
         self.model = model or os.environ.get("IDCS_MODEL") or DEFAULT_MODEL
         self.require_parameters = require_parameters
+        # Budget tracking. Every API call attempt (success or failure)
+        # increments ``calls_made``. Once it would exceed ``max_calls`` the
+        # next call raises ``BudgetExceededError`` instead of contacting
+        # the provider. ``None`` means no cap.
+        self.max_calls = max_calls
+        self.calls_made = 0
+        self.structured_fallback_count = 0
+
+    def _check_budget(self) -> None:
+        if self.max_calls is not None and self.calls_made >= self.max_calls:
+            raise BudgetExceededError(
+                f"LLM call budget exhausted ({self.calls_made}/{self.max_calls})"
+            )
+
+    def _with_retry(self, fn: Callable[[], T_ret]) -> T_ret:
+        """Call ``fn()`` with budget tracking + exponential backoff on 429/5xx.
+
+        Counts every attempt against ``calls_made``: a 429 retry costs as
+        much money as a successful call, so it should count too.
+        """
+        for attempt in range(MAX_RETRIES + 1):
+            self._check_budget()
+            try:
+                result = fn()
+                self.calls_made += 1
+                return result
+            except openai.RateLimitError:
+                self.calls_made += 1
+                if attempt == MAX_RETRIES:
+                    raise
+                delay = (2**attempt) + random.uniform(0, 1)
+                log.warning(
+                    "429 rate-limited, retry %d/%d in %.1fs",
+                    attempt + 1, MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+            except openai.APIStatusError as e:
+                self.calls_made += 1
+                if e.status_code < 500 or attempt == MAX_RETRIES:
+                    raise
+                delay = (2**attempt) + random.uniform(0, 1)
+                log.warning(
+                    "%d server error, retry %d/%d in %.1fs",
+                    e.status_code, attempt + 1, MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+        raise AssertionError("unreachable")
 
     @property
     def _extra_body(self) -> dict[str, Any]:
@@ -131,7 +161,7 @@ class LLM:
         max_tokens: int = 16000,
     ) -> str:
         """Return the assistant message's text content (empty string if absent)."""
-        response = _with_retry(
+        response = self._with_retry(
             lambda: self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
@@ -168,8 +198,10 @@ class LLM:
             f"response.\n\n"
             f"Schema:\n```json\n{schema_text}\n```"
         )
+        fallback_reason: str | None = None
+        calls_before_parse = self.calls_made
         try:
-            response = _with_retry(
+            response = self._with_retry(
                 lambda: self.client.beta.chat.completions.parse(
                     model=self.model,
                     max_tokens=max_tokens,
@@ -184,14 +216,24 @@ class LLM:
             parsed = response.choices[0].message.parsed
             if parsed is not None:
                 return parsed
+            fallback_reason = "parsed_none"
         except (ValidationError, KeyError):
-            log.warning(
-                "Structured parse failed for %s, falling back to text extraction",
-                output_type.__name__,
-            )
+            if self.calls_made == calls_before_parse:
+                self.calls_made += 1
+            fallback_reason = "parse_exception"
+
+        self._record_structured_fallback(output_type.__name__, fallback_reason or "unknown")
 
         raw = self.complete(system, augmented_user, max_tokens=max_tokens)
         return _parse_json_response(raw, output_type)
+
+    def _record_structured_fallback(self, output_type_name: str, reason: str) -> None:
+        self.structured_fallback_count += 1
+        log.warning(
+            "Structured parse fallback for %s (%s); falling back to text extraction",
+            output_type_name,
+            reason,
+        )
 
 
 def _parse_json_response(raw: str, output_type: type[T]) -> T:
@@ -239,4 +281,3 @@ def _looks_like_schema_echo(data: dict[str, Any]) -> bool:
         return True
     # Bare schema shape: ``type: object`` + ``properties`` at top level
     return data.get("type") == "object" and "properties" in data
-

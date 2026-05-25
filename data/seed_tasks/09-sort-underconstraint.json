@@ -1,0 +1,44 @@
+{
+  "task": {
+    "id": "vuln/09-sort-underconstraint",
+    "prompt": "Write a function `sort_ascending(lst)` that sorts a list of integers in ascending order and returns the sorted list.",
+    "tests": [
+      {"id": "vuln/09/t0", "code": "assert sort_ascending([3, 1, 2]) == [1, 2, 3]"},
+      {"id": "vuln/09/t1", "code": "assert sort_ascending([]) == []"},
+      {"id": "vuln/09/t2", "code": "assert sort_ascending([1]) == [1]"},
+      {"id": "vuln/09/t3", "code": "assert sort_ascending([5, 5, 3, 3, 1]) == [1, 3, 3, 5, 5]"},
+      {"id": "vuln/09/t4", "code": "assert sort_ascending([-2, 0, -1]) == [-2, -1, 0]"},
+      {"id": "vuln/09/t5", "code": "assert sort_ascending([1, 2, 3]) == [1, 2, 3]"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return a new list containing all elements of the input sorted in ascending order.",
+    "inputs": [
+      {"name": "lst", "type": "list[int]", "description": "list of integers to sort", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "list[int]", "description": "sorted list", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "result is sorted in non-decreasing order: result[i] <= result[i+1] for all valid i",
+      "result is a permutation of lst (same elements, same counts)",
+      "result is a newly-allocated list; the input lst is not mutated and is not returned as the same object"
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "empty list returns a new empty list",
+      "single-element list returns a new list with the same element",
+      "list with duplicates preserves all copies",
+      "already-sorted input returns a new list with the same elements in the same order"
+    ],
+    "acceptance_criteria": [
+      "result == sorted(lst)"
+    ]
+  },
+  "known_weakness": {
+    "type": "underconstraint",
+    "description": "A naive spec that only says 'output is sorted ascending' without requiring it to be a permutation of the input is satisfied by trivial implementations like `return []` or `return [min(lst)] * len(lst)`. The Distinguisher must catch the missing permutation postcondition.",
+    "naive_spec_gap": "postconditions missing 'result is a permutation of lst'"
+  }
+}

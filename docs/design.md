@@ -19,7 +19,10 @@ class Spec:           # structured artifact G produces
     acceptance_criteria: list[str]
 
 class Issue:
-    kind: Literal["gap", "ambiguity", "contradiction", "over_constraint"]
+    kind: Literal[
+        "gap", "ambiguity", "contradiction",
+        "over_constraint", "underconstraint", "implicit_assumption",
+    ]
     route: Literal["generator", "user"]   # type-1 vs type-2
     location: SpecPath                     # which field
     description: str
