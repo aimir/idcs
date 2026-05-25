@@ -10,10 +10,18 @@ Example:
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
+import argparse
+import json
+import random
 import sys
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+from threading import Lock
+from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) in sys.path:
@@ -21,17 +29,6 @@ if str(_SCRIPT_DIR) in sys.path:
 _SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-import argparse
-import json
-import random
-import time
-import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
-from datetime import datetime
-from threading import Lock
-from typing import Any
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
 from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
@@ -125,6 +122,8 @@ def _record_result(
     *,
     counters: ProbeCounters,
     results_path: Path,
+    summary_path: Path,
+    meta: dict[str, Any],
 ) -> None:
     counters.done += 1
     if result.get("error"):
@@ -142,6 +141,15 @@ def _record_result(
 
     with results_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(result, sort_keys=True) + "\n")
+
+    # Refresh summary.json after every task so interrupted probes still
+    # leave a usable summary on disk — same pattern as batch_baseline.py.
+    summary = {
+        **meta,
+        **asdict(counters),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
     if result.get("error"):
         print(f"[{counters.done}] ERROR {result.get('task_id')}: {result['error']}", flush=True)
@@ -203,6 +211,8 @@ def main(argv: list[str]) -> int:
                 _run_with_error_capture(task),
                 counters=counters,
                 results_path=results_path,
+                summary_path=summary_path,
+                meta=meta,
             )
     else:
         lock = Lock()
@@ -214,14 +224,10 @@ def main(argv: list[str]) -> int:
                         future.result(),
                         counters=counters,
                         results_path=results_path,
+                        summary_path=summary_path,
+                        meta=meta,
                     )
 
-    summary = {
-        **meta,
-        **asdict(counters),
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(summary_path.read_text(encoding="utf-8"), flush=True)
     return 0 if counters.errors == 0 else 2
 

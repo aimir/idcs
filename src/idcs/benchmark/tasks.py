@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from idcs.benchmark.scoring import EQUALITY_HELPER_SRC, INFINITY_LITERAL_PRELUDE
 from idcs.schemas import Task, Test
 
 MBPP_PLUS_DATASET = "mbpp-plus"
@@ -29,18 +30,6 @@ HARD_MBPP_PLUS_IDS: tuple[str, ...] = (
     "Mbpp/92",  # undulating means exactly two alternating digits, including short cases
     "Mbpp/597",  # kth merged element with empty arrays and mixed comparable values
 )
-
-HUMANEVAL_PLUS_FOLLOWUP_IDS: tuple[str, ...] = (
-    "HumanEval/125",
-    "HumanEval/126",
-    "HumanEval/99",
-    "HumanEval/124",
-    "HumanEval/26",
-    "HumanEval/95",
-    "HumanEval/134",
-    "HumanEval/68",
-)
-
 
 def load_mbpp_plus(
     *,
@@ -84,7 +73,7 @@ def load_benchmark_tasks(
 ) -> list[Task]:
     """Load a named benchmark dataset used by the scripts."""
     if dataset in {"mbpp", MBPP_PLUS_DATASET}:
-        return load_mbpp_plus()
+        return load_mbpp_plus(max_plus_inputs=max_plus_inputs)
     if dataset == HARD_DATASET:
         return load_mbpp_hard(max_plus_inputs=max_plus_inputs)
     raise ValueError(
@@ -172,8 +161,12 @@ def _build_evalplus_case_test(
     cases: Sequence[Any],
     atol: float,
 ) -> str:
+    # ``repr(cases)`` emits bare ``inf`` / ``nan`` for infinity/NaN values;
+    # ``INFINITY_LITERAL_PRELUDE`` defines those names so the literal parses.
+    # ``EQUALITY_HELPER_SRC`` is shared with ``scoring._HARNESS``.
     return (
         "import math\n\n"
+        f"{INFINITY_LITERAL_PRELUDE}\n"
         f"_IDCS_ORACLE_SRC = {canonical_solution!r}\n"
         "_IDCS_ORACLE_NS = {}\n"
         "exec(_IDCS_ORACLE_SRC, _IDCS_ORACLE_NS)\n"
@@ -181,7 +174,7 @@ def _build_evalplus_case_test(
         f"_IDCS_CANDIDATE = {entry_point}\n"
         f"_IDCS_CASES = {list(cases)!r}\n"
         f"_IDCS_ATOL = {atol!r}\n\n"
-        f"{_evalplus_equality_helper()}\n\n"
+        f"{EQUALITY_HELPER_SRC}\n"
         "for _IDCS_CASE in _IDCS_CASES:\n"
         "    _IDCS_ACTUAL = _IDCS_CANDIDATE(*_IDCS_CASE)\n"
         "    _IDCS_EXPECTED = _IDCS_ORACLE(*_IDCS_CASE)\n"
@@ -189,20 +182,3 @@ def _build_evalplus_case_test(
         "        f'input={_IDCS_CASE!r} expected={_IDCS_EXPECTED!r} actual={_IDCS_ACTUAL!r}'\n"
         "    )\n"
     )
-
-
-def _evalplus_equality_helper() -> str:
-    return """
-def _idcs_equal(actual, expected, atol):
-    if isinstance(actual, float) or isinstance(expected, float):
-        return math.isclose(actual, expected, rel_tol=0.0, abs_tol=atol)
-    if isinstance(actual, (list, tuple)) and isinstance(expected, (list, tuple)):
-        return len(actual) == len(expected) and all(
-            _idcs_equal(a, e, atol) for a, e in zip(actual, expected, strict=True)
-        )
-    if isinstance(actual, dict) and isinstance(expected, dict):
-        return actual.keys() == expected.keys() and all(
-            _idcs_equal(actual[key], expected[key], atol) for key in expected
-        )
-    return actual == expected
-""".strip()

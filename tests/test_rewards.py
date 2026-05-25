@@ -4,7 +4,7 @@ from idcs.rewards import RewardWeights, compute_reward_breakdown, compute_spec_c
 from idcs.schemas import Issue, Spec, Trace, Turn
 
 
-def _spec() -> Spec:
+def _minimal_spec() -> Spec:
     return Spec(goal="goal")
 
 
@@ -17,9 +17,13 @@ def test_reward_counts_and_fixed() -> None:
         description="ambiguous",
         suggested_question="?",
     )
-    turn1 = Turn(spec=_spec(), issues=[type1, type2], user_answers={"inputs[0].type": "int"})
-    turn2 = Turn(spec=_spec(), issues=[], user_answers={})
-    trace = Trace(task_id="t1", turns=[turn1, turn2], final_spec=_spec())
+    turn1 = Turn(
+        spec=_minimal_spec(),
+        issues=[type1, type2],
+        user_answers={"inputs[0].type": "int"},
+    )
+    turn2 = Turn(spec=_minimal_spec(), issues=[], user_answers={})
+    trace = Trace(task_id="t1", turns=[turn1, turn2], final_spec=_minimal_spec())
 
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "prompt", benchmark_score=0.5, weights=weights)
@@ -38,7 +42,7 @@ def test_type2_dismissed_counts() -> None:
         description="needs clarification",
         suggested_question="?",
     )
-    trace = Trace(task_id="t2", turns=[Turn(spec=_spec(), issues=[issue], user_answers={})])
+    trace = Trace(task_id="t2", turns=[Turn(spec=_minimal_spec(), issues=[issue], user_answers={})])
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "prompt", benchmark_score=0.0, weights=weights)
     assert breakdown.type2_dismissed_count == 1
@@ -55,7 +59,7 @@ def test_type2_dismissed_skips_unaskable_issues() -> None:
         description="needs clarification",
         suggested_question=None,
     )
-    trace = Trace(task_id="t", turns=[Turn(spec=_spec(), issues=[issue], user_answers={})])
+    trace = Trace(task_id="t", turns=[Turn(spec=_minimal_spec(), issues=[issue], user_answers={})])
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "prompt", benchmark_score=0.0, weights=weights)
     assert breakdown.type2_count == 1
@@ -84,10 +88,10 @@ def test_type1_fixed_ignores_description_rewording() -> None:
     trace = Trace(
         task_id="t",
         turns=[
-            Turn(spec=_spec(), issues=[type1_orig]),
-            Turn(spec=_spec(), issues=[type1_reword]),
+            Turn(spec=_minimal_spec(), issues=[type1_orig]),
+            Turn(spec=_minimal_spec(), issues=[type1_reword]),
         ],
-        final_spec=_spec(),
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "p", benchmark_score=0.0, weights=weights)
@@ -106,10 +110,10 @@ def test_type1_fixed_credits_actual_fix() -> None:
     trace = Trace(
         task_id="t",
         turns=[
-            Turn(spec=_spec(), issues=[type1]),
-            Turn(spec=_spec(), issues=[]),
+            Turn(spec=_minimal_spec(), issues=[type1]),
+            Turn(spec=_minimal_spec(), issues=[]),
         ],
-        final_spec=_spec(),
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "p", benchmark_score=0.0, weights=weights)
@@ -130,8 +134,8 @@ def test_excess_type2_penalizes_distinguisher_not_generator() -> None:
     ]
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=issues, user_answers={})],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=issues, user_answers={})],
+        final_spec=_minimal_spec(),
     )
     capped = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=5)
     uncapped = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=999)
@@ -159,8 +163,8 @@ def test_useful_clarification_rate_is_zero_without_baseline() -> None:
     )
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=[issue], user_answers={"goal": "yes"})],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=[issue], user_answers={"goal": "yes"})],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "p", benchmark_score=0.8, weights=weights)
@@ -178,8 +182,8 @@ def test_useful_clarification_rate_uses_baseline_when_provided() -> None:
     )
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=[issue], user_answers={"goal": "yes"})],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=[issue], user_answers={"goal": "yes"})],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(
@@ -193,8 +197,8 @@ def test_useful_clarification_rate_zero_when_no_clarifications() -> None:
     """No user answers → division by zero avoided; rate stays 0 even with baseline."""
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=[], user_answers={})],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=[], user_answers={})],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(
@@ -217,8 +221,8 @@ def test_at_cap_no_excess_penalty() -> None:
     ]
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=issues, user_answers={})],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=issues, user_answers={})],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0, max_type2_per_episode=5)
     b = compute_reward_breakdown(trace, "p", benchmark_score=0.5, weights=weights)
@@ -246,8 +250,8 @@ def test_route_change_does_not_count_as_fixed() -> None:
     )
     trace = Trace(
         task_id="t",
-        turns=[Turn(spec=_spec(), issues=[t1]), Turn(spec=_spec(), issues=[t2])],
-        final_spec=_spec(),
+        turns=[Turn(spec=_minimal_spec(), issues=[t1]), Turn(spec=_minimal_spec(), issues=[t2])],
+        final_spec=_minimal_spec(),
     )
     weights = RewardWeights(min_spec_ratio=0.0)
     breakdown = compute_reward_breakdown(trace, "p", benchmark_score=0.0, weights=weights)
