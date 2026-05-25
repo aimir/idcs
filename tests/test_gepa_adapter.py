@@ -166,3 +166,5 @@ def test_adapter_proposes_new_texts_with_existing_mutator() -> None:
     assert len(llm.typed_calls) == 1
     assert "ROLE: generator" in llm.typed_calls[0][1]
     assert "GEPA selected generator_prompt" in llm.typed_calls[0][1]
+    assert "High-signal summary" in llm.typed_calls[0][1]
+    assert "expected lowercase only" in llm.typed_calls[0][1]

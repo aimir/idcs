@@ -433,14 +433,39 @@ def _proposal_feedback(
             f"GEPA selected {component} for mutation but no reflective records "
             "were available. Make a conservative, role-preserving improvement."
         )
+    concise = "\n\n".join(
+        _record_feedback_summary(index, record)
+        for index, record in enumerate(records, 1)
+    )
     serialized = json.dumps(list(records), indent=2, ensure_ascii=False, default=str)
     return (
         f"GEPA selected {component} for mutation based on these reflective "
         "records. Improve the prompt to address recurring failures and reward "
         "signals. Preserve the role and schema contract. Do not encode task ids, "
         "exact hidden inputs, or lookup tables.\n\n"
+        "High-signal summary:\n"
+        f"{concise}\n\n"
+        "Full reflective context, truncated if needed:\n"
         f"{_truncate(serialized, 6000)}"
     )
+
+
+def _record_feedback_summary(index: int, record: Mapping[str, Any]) -> str:
+    score = record.get("Score", {})
+    failures = record.get("Failed hidden-test feedback", [])
+    task = record.get("Task", {})
+    guidance = record.get("Component-specific guidance", "")
+    return (
+        f"Record {index}\n"
+        f"- Task: {_safe_json(task)}\n"
+        f"- Score: {_safe_json(score)}\n"
+        f"- Guidance: {guidance}\n"
+        f"- Hidden-test failures: {_safe_json(failures)}"
+    )
+
+
+def _safe_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str)
 
 
 def _issues_by_turn(trace: Trace | None) -> list[dict[str, Any]]:
