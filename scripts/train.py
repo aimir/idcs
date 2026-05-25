@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--sample", type=int, default=None)
+    parser.add_argument("--tasks", nargs="*", default=None, help="specific task IDs")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--pop-size", type=int, default=8)
@@ -49,6 +50,21 @@ def main() -> int:
     parser.add_argument("--no-telemetry", action="store_true")
     parser.add_argument("--generator-prompt-file", type=Path, default=None)
     parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Override the main G/D/coder model for this run.",
+    )
+    parser.add_argument(
+        "--mutator-model",
+        type=str,
+        default=None,
+        help=(
+            "Override the prompt-mutator model. If it matches --model, "
+            "the run reuses the main LLM instance so call accounting stays shared."
+        ),
+    )
     parser.add_argument(
         "--val-fraction",
         type=float,
@@ -60,19 +76,25 @@ def main() -> int:
         type=int,
         default=None,
         help=(
-            "Hard ceiling on total LLM API calls (main + mutator). "
-            "Once hit, the next call raises BudgetExceededError and the run exits."
+            "Hard ceiling on main LLM API calls. If --mutator-model matches "
+            "--model, mutation calls share this cap too."
         ),
     )
     args = parser.parse_args()
 
-    llm = LLM(max_calls=args.max_llm_calls)
-    # Optional cheaper model for the mutator. Defaults to the main LLM if
-    # IDCS_MUTATOR_MODEL is unset.
-    mutator_model = os.environ.get("IDCS_MUTATOR_MODEL")
-    mutator_llm = LLM(model=mutator_model) if mutator_model else None
+    llm = LLM(model=args.model, max_calls=args.max_llm_calls)
+    # Optional separate model for the mutator. Defaults to the main LLM if
+    # neither --mutator-model nor IDCS_MUTATOR_MODEL is set.
+    mutator_model = args.mutator_model or os.environ.get("IDCS_MUTATOR_MODEL")
+    mutator_llm = (
+        LLM(model=mutator_model)
+        if mutator_model and mutator_model != llm.model
+        else None
+    )
     if mutator_llm is not None:
         print(f"Using {mutator_llm.model} for prompt mutations (main: {llm.model}).")
+    else:
+        print(f"Using {llm.model} for G/D/coder and prompt mutations.")
     generator_prompt = (
         args.generator_prompt_file.read_text(encoding="utf-8")
         if args.generator_prompt_file
@@ -105,6 +127,13 @@ def main() -> int:
 
         user_factory = null_user_factory
 
+    if args.tasks:
+        task_ids = set(args.tasks)
+        tasks = [task for task in tasks if task.id in task_ids]
+        missing = sorted(task_ids - {task.id for task in tasks})
+        if missing:
+            print(f"Task IDs not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     if args.offset:
         tasks = tasks[args.offset:]
     if args.sample:

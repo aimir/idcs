@@ -44,6 +44,7 @@ def _print_config(run_dir: Path) -> None:
         return
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     print(f"model:        {cfg.get('model')}")
+    print(f"mutator:      {cfg.get('mutator_model') or cfg.get('model')}")
     weights = cfg.get("weights", {})
     print(f"weights:      α={weights.get('alpha')}  β={weights.get('beta')}  "
           f"γ={weights.get('gamma')}  δ={weights.get('delta')}  ε={weights.get('epsilon')}  "

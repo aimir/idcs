@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from idcs.benchmark.scoring import score, score_detailed
+from idcs.benchmark.scoring import FailureExample, GraderOutcome, score, score_detailed
 from idcs.schemas import Task, Test
 
 
@@ -112,6 +112,30 @@ class TestMbppPlusScorer:
         assert result.pass_rate == 1 / 3
         assert result.base_pass_rate == 1.0
 
+    def test_plus_failures_include_hidden_examples(self) -> None:
+        failure = FailureExample(
+            input_repr="[3, 4]",
+            expected_repr="7",
+            actual_repr="0",
+        )
+        with patch(
+            "idcs.benchmark.scoring._mbpp_groundtruth",
+            return_value=(self._problems(), self._expected()),
+        ), patch(
+            "idcs.benchmark.scoring._run_grader",
+            side_effect=[
+                GraderOutcome(
+                    results=[True, False, True],
+                    failure_examples=[failure],
+                ),
+                GraderOutcome(results=[True, True]),
+            ],
+        ):
+            result = score_detailed(_mbpp_task(), "def add(a,b): return 0")
+
+        assert result.pass_rate == 2 / 3
+        assert result.failure_examples == [failure]
+
     def test_subprocess_error_surfaces(self) -> None:
         with patch(
             "idcs.benchmark.scoring._mbpp_groundtruth",
@@ -155,14 +179,27 @@ class TestRunGraderEndToEnd:
     def test_wrong_code_fails_all(self) -> None:
         from idcs.benchmark.scoring import _run_grader
 
-        results, err = _run_grader(
+        outcome = _run_grader(
             code="def add(a, b):\n    return 0\n",
             entry="add",
             inputs=[[1, 2], [3, 4]],
             expected=[3, 7],
         )
+        results, err = outcome
         assert err is None
         assert results == [False, False]
+        assert [example.input_repr for example in outcome.failure_examples] == [
+            "[1, 2]",
+            "[3, 4]",
+        ]
+        assert [example.expected_repr for example in outcome.failure_examples] == [
+            "3",
+            "7",
+        ]
+        assert [example.actual_repr for example in outcome.failure_examples] == [
+            "0",
+            "0",
+        ]
 
     def test_missing_entry_point_fails_all(self) -> None:
         from idcs.benchmark.scoring import _run_grader

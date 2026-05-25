@@ -30,6 +30,10 @@ Rules:
   produce specs; a distinguisher prompt must still critique them.
 - Address the feedback. The feedback names specific failure modes —
   your edits should plausibly improve them.
+- If feedback includes concrete hidden-test failures, infer the reusable
+  semantic rule behind them and add prompt instructions that make the
+  role discover that rule on future tasks. Do not copy the individual
+  failing inputs as a dataset-specific lookup table.
 - Be substantive. Don't paraphrase — make a real change (add a
   principle, drop a constraint, restructure a section).
 - Keep markdown structure (`#`, `##` headings, bullet lists) where the
