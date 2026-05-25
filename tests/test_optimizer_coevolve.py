@@ -300,3 +300,47 @@ def test_failure_summary_adds_string_filter_hint() -> None:
     assert "expected is a filtered subsequence of actual" in summary
     assert "expected contains only lowercase alphabetic characters" in summary
     assert "actual preserved punctuation/symbols absent from expected" in summary
+
+
+def test_failure_summary_adds_proper_name_aggregate_hint() -> None:
+    task = Task(id="Mbpp/639", prompt="", entry_point="sample_nam", tests=[])
+    result = ScoreResult(
+        pass_count=2,
+        total_count=111,
+        pass_rate=2 / 111,
+        failure_examples=[
+            FailureExample(
+                input_repr="[['John', 'D@ve', 'MarY', 'Linda', 'Zach!', '@lex']]",
+                expected_repr="18",
+                actual_repr="26",
+            )
+        ],
+    )
+
+    summary = _format_failure_summaries(task, result)[0]
+
+    assert "first character is uppercase" in summary
+    assert "Python lowercase semantics" in summary
+    assert "do not add an alphabetic-only/isalpha requirement" in summary
+
+
+def test_failure_summary_adds_date_reordering_hint() -> None:
+    task = Task(id="Mbpp/427", prompt="", entry_point="change_date_format", tests=[])
+    result = ScoreResult(
+        pass_count=3,
+        total_count=112,
+        pass_rate=3 / 112,
+        failure_examples=[
+            FailureExample(
+                input_repr="['2021-1-026']",
+                expected_repr="'02-1-20216'",
+                actual_repr=None,
+                error="ValueError: unconverted data remains: 6",
+            )
+        ],
+    )
+
+    summary = _format_failure_summaries(task, result)[0]
+
+    assert "regex-style yyyy-mm-dd to dd-mm-yyyy reordering" in summary
+    assert "not datetime validation" in summary

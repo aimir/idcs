@@ -157,6 +157,46 @@ def test_adapter_uses_role_specific_llms_for_evaluation() -> None:
     assert fallback_llm.text_calls == []
 
 
+def test_adapter_can_optimize_raw_benchmark_score() -> None:
+    task = _task()
+    llm = FakeLLM(
+        typed_responses=[_spec(), IssueList(issues=[])],
+        text_responses=["def add(a, b):\n    return a + b if a > 0 else 0\n"],
+    )
+    adapter = IDCSGepaAdapter(
+        llm=llm,
+        generator_prompt="generator seed",
+        distinguisher_prompt="distinguisher seed",
+        baseline_scores={task.id: 1.0},
+        max_turns=1,
+        score_mode="benchmark",
+    )
+    candidate = seed_candidate(
+        generator_prompt="generator candidate",
+        distinguisher_prompt="distinguisher candidate",
+    )
+
+    batch = adapter.evaluate([task], candidate)
+
+    assert batch.outputs[0].benchmark_score == 0.5
+    assert batch.outputs[0].regression_penalty == 0.5
+    assert batch.scores == [0.5]
+
+
+def test_adapter_rejects_unknown_score_mode() -> None:
+    try:
+        IDCSGepaAdapter(
+            llm=FakeLLM(),
+            generator_prompt="generator seed",
+            distinguisher_prompt="distinguisher seed",
+            score_mode="mystery",
+        )
+    except ValueError as exc:
+        assert "score_mode must be one of" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def test_compute_direct_baselines_scores_prompt_path() -> None:
     task = _task()
     llm = FakeLLM(text_responses=["def add(a, b):\n    return a + b\n"])

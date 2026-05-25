@@ -35,6 +35,9 @@ DISTINGUISHER_COMPONENT = "distinguisher_prompt"
 CODER_COMPONENT = "coder_prompt"
 
 OPTIMIZED_COMPONENTS = (GENERATOR_COMPONENT, DISTINGUISHER_COMPONENT)
+REWARD_SCORE_MODE = "reward"
+BENCHMARK_SCORE_MODE = "benchmark"
+SCORE_MODES = (REWARD_SCORE_MODE, BENCHMARK_SCORE_MODE)
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,12 @@ class IDCSGepaAdapter:
     weights: RewardWeights = field(default_factory=RewardWeights)
     baseline_scores: Mapping[str, float] = field(default_factory=dict)
     max_turns: int = 3
+    score_mode: str = REWARD_SCORE_MODE
+
+    def __post_init__(self) -> None:
+        if self.score_mode not in SCORE_MODES:
+            allowed = ", ".join(SCORE_MODES)
+            raise ValueError(f"score_mode must be one of: {allowed}")
 
     def evaluate(
         self,
@@ -273,7 +282,7 @@ class IDCSGepaAdapter:
             output = IDCSGepaOutput(
                 task_id=task.id,
                 entry_point=task.entry_point,
-                score=_optimization_score(breakdown),
+                score=_optimization_score(breakdown, mode=self.score_mode),
                 benchmark_score=benchmark,
                 benchmark_delta=breakdown.benchmark_delta,
                 regression_penalty=breakdown.regression_penalty,
@@ -345,7 +354,12 @@ def seed_candidate(
     return candidate
 
 
-def _optimization_score(breakdown: RewardBreakdown) -> float:
+def _optimization_score(breakdown: RewardBreakdown, *, mode: str = REWARD_SCORE_MODE) -> float:
+    if mode == BENCHMARK_SCORE_MODE:
+        return max(0.0, min(1.0, breakdown.benchmark_score))
+    if mode != REWARD_SCORE_MODE:
+        allowed = ", ".join(SCORE_MODES)
+        raise ValueError(f"score mode must be one of: {allowed}")
     combined = (breakdown.r_generator + breakdown.r_distinguisher) / 2.0
     return max(0.0, min(1.0, combined))
 

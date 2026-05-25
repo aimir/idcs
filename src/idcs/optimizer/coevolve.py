@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -612,10 +613,18 @@ def _format_failure_summaries(task: Task, result: ScoreResult) -> list[str]:
 def _failure_hint(example: FailureExample) -> str | None:
     expected = _literal_eval_repr(example.expected_repr)
     actual = _literal_eval_repr(example.actual_repr)
-    if not isinstance(expected, str) or not isinstance(actual, str):
-        return None
+    task_input = _literal_eval_repr(example.input_repr)
 
     hints: list[str] = []
+    aggregate_hint = _aggregate_failure_hint(task_input, expected, actual)
+    if aggregate_hint:
+        hints.append(aggregate_hint)
+    date_hint = _date_format_failure_hint(task_input, expected, example.error)
+    if date_hint:
+        hints.append(date_hint)
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        return "; ".join(hints) if hints else None
+
     if expected and _is_subsequence(expected, actual) and expected != actual:
         hints.append("expected is a filtered subsequence of actual")
     if expected and expected.isalpha() and expected.islower():
@@ -628,6 +637,71 @@ def _failure_hint(example: FailureExample) -> str | None:
     if not hints:
         return None
     return "; ".join(hints)
+
+
+def _aggregate_failure_hint(
+    task_input: object | None,
+    expected: object | None,
+    actual: object | None,
+) -> str | None:
+    if not isinstance(expected, int) or not isinstance(actual, int):
+        return None
+    if not (
+        isinstance(task_input, list)
+        and len(task_input) == 1
+        and isinstance(task_input[0], list)
+        and all(isinstance(item, str) for item in task_input[0])
+    ):
+        return None
+    names = task_input[0]
+    proper_name_total = sum(
+        len(name)
+        for name in names
+        if name and name[0].isupper() and name[1:].islower()
+    )
+    if expected != proper_name_total:
+        return None
+    if actual > expected:
+        return (
+            "expected counts only names whose first character is uppercase and "
+            "whose remaining characters satisfy Python lowercase semantics; "
+            "do not add an alphabetic-only/isalpha requirement unless failures "
+            "show it, because Python str.islower() can still be true with "
+            "punctuation or symbols in the suffix; actual likely included "
+            "mixed-case names or strings whose first character is not uppercase"
+        )
+    return (
+        "expected sum is based on names whose first character is uppercase and "
+        "whose remaining characters satisfy Python lowercase semantics; avoid "
+        "adding alphabetic-only/isalpha restrictions unless failures show them"
+    )
+
+
+def _date_format_failure_hint(
+    task_input: object | None,
+    expected: object | None,
+    error: str | None,
+) -> str | None:
+    if not (
+        isinstance(task_input, list)
+        and len(task_input) == 1
+        and isinstance(task_input[0], str)
+        and isinstance(expected, str)
+    ):
+        return None
+    transformed = re.sub(r"(\d{4})-(\d{1,2})-(\d{1,2})", r"\3-\2-\1", task_input[0])
+    if transformed != expected:
+        return None
+    if error and ("ValueError" in error or "does not match format" in error):
+        return (
+            "expected textual regex-style yyyy-mm-dd to dd-mm-yyyy reordering, "
+            "not datetime validation; preserve invalid dates, variable-width "
+            "fields, and trailing text matched by the transformation"
+        )
+    return (
+        "expected textual yyyy-mm-dd to dd-mm-yyyy reordering rather than "
+        "semantic date parsing"
+    )
 
 
 def _literal_eval_repr(value: str | None) -> object | None:

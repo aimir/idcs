@@ -34,7 +34,12 @@ from idcs._prompts import load_prompt
 from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks
 from idcs.llm import LLM, BudgetExceededError
 from idcs.optimizer.gepa_adapter import (
+    BENCHMARK_SCORE_MODE,
+    CODER_COMPONENT,
+    DISTINGUISHER_COMPONENT,
+    GENERATOR_COMPONENT,
     IDCSGepaAdapter,
+    REWARD_SCORE_MODE,
     compute_direct_baselines,
     seed_candidate,
 )
@@ -61,11 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     role_llms = _make_role_llms(args)
     generator_prompt = _read_prompt(args.generator_prompt_file, "generator_v0")
     distinguisher_prompt = _read_prompt(args.distinguisher_prompt_file, "distinguisher_v0")
-    coder_prompt = (
-        args.coder_prompt_file.read_text(encoding="utf-8")
-        if args.coder_prompt_file is not None
-        else None
-    )
+    coder_prompt = _read_coder_prompt(args)
 
     tasks, user_factory = _load_tasks(args, role_llms["generator"])
     if not tasks:
@@ -118,15 +119,19 @@ def main(argv: list[str] | None = None) -> int:
         user_factory=user_factory,
         baseline_scores=baselines,
         max_turns=args.max_turns,
+        score_mode=args.score_mode,
     )
 
     try:
+        candidate = _seed_candidate_for_components(
+            generator_prompt=generator_prompt,
+            distinguisher_prompt=distinguisher_prompt,
+            coder_prompt=coder_prompt,
+            optimize_coder=args.optimize_coder,
+            components=args.components,
+        )
         result = gepa.optimize(
-            seed_candidate=seed_candidate(
-                generator_prompt=generator_prompt,
-                distinguisher_prompt=distinguisher_prompt,
-                coder_prompt=coder_prompt if args.optimize_coder else None,
-            ),
+            seed_candidate=candidate,
             trainset=tasks,
             valset=val_tasks or tasks,
             adapter=adapter,
@@ -157,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         "llm_calls_used": _total_calls(role_llms),
         "llm_calls_by_role": _role_call_counts(role_llms),
         "models_by_role": _role_models(role_llms),
+        "score_mode": args.score_mode,
         "gepa_run_dir": result.run_dir,
     }
     (run_dir / "summary.json").write_text(
@@ -202,6 +208,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--mutator-model", type=str, default=None)
     parser.add_argument("--coder-model", type=str, default=None)
     parser.add_argument("--reflection-model", type=str, default=None, help="GEPA reflection LM.")
+    parser.add_argument(
+        "--score-mode",
+        choices=[REWARD_SCORE_MODE, BENCHMARK_SCORE_MODE],
+        default=REWARD_SCORE_MODE,
+        help="GEPA selection score: IDCS reward or raw hidden-test benchmark pass rate.",
+    )
     parser.add_argument("--max-llm-calls", type=int, default=None)
     parser.add_argument("--max-metric-calls", type=int, default=25)
     parser.add_argument(
@@ -219,6 +231,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--progress", action="store_true")
     parser.add_argument("--skip-baselines", action="store_true")
     parser.add_argument("--optimize-coder", action="store_true")
+    parser.add_argument(
+        "--components",
+        nargs="+",
+        choices=[GENERATOR_COMPONENT, DISTINGUISHER_COMPONENT, CODER_COMPONENT],
+        default=None,
+        help="Restrict GEPA mutations to these candidate components.",
+    )
     parser.add_argument("--run-dir", type=Path, default=None)
     parser.add_argument("--generator-prompt-file", type=Path, default=None)
     parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
@@ -261,6 +280,44 @@ def _read_prompt(path: Path | None, default_name: str) -> str:
     if path is not None:
         return path.read_text(encoding="utf-8")
     return load_prompt(default_name)
+
+
+def _read_coder_prompt(args: argparse.Namespace) -> str | None:
+    if args.coder_prompt_file is not None:
+        return args.coder_prompt_file.read_text(encoding="utf-8")
+    if args.optimize_coder:
+        return load_prompt("coder_v0")
+    return None
+
+
+def _seed_candidate_for_components(
+    *,
+    generator_prompt: str,
+    distinguisher_prompt: str,
+    coder_prompt: str | None,
+    optimize_coder: bool,
+    components: Sequence[str] | None,
+) -> dict[str, str]:
+    candidate = seed_candidate(
+        generator_prompt=generator_prompt,
+        distinguisher_prompt=distinguisher_prompt,
+        coder_prompt=coder_prompt if optimize_coder else None,
+    )
+    if components is None:
+        return candidate
+    selected = {
+        component: candidate[component]
+        for component in components
+        if component in candidate
+    }
+    missing = sorted(set(components) - set(selected))
+    if missing:
+        raise SystemExit(
+            "Cannot optimize components absent from the seed candidate: "
+            + ", ".join(missing)
+            + ". Use --optimize-coder when selecting coder_prompt."
+        )
+    return selected
 
 
 def _load_tasks(
