@@ -133,3 +133,36 @@ def test_compute_direct_baselines_scores_prompt_path() -> None:
 
     assert baselines == {task.id: 1.0}
     assert "MODE: from_prompt" in llm.text_calls[0][1]
+
+
+def test_adapter_proposes_new_texts_with_existing_mutator() -> None:
+    llm = FakeLLM(
+        typed_responder=lambda system, user, output_type: output_type(
+            prompts=["# Generator improved\n\nWrite edge cases explicitly."]
+        )
+    )
+    adapter = IDCSGepaAdapter(
+        llm=llm,
+        generator_prompt="generator seed",
+        distinguisher_prompt="distinguisher seed",
+    )
+
+    proposed = adapter.propose_new_texts(
+        {GENERATOR_COMPONENT: "generator current"},
+        {
+            GENERATOR_COMPONENT: [
+                {
+                    "Score": {"benchmark_score": 0.25},
+                    "Failed hidden-test feedback": ["expected lowercase only"],
+                }
+            ]
+        },
+        [GENERATOR_COMPONENT],
+    )
+
+    assert proposed == {
+        GENERATOR_COMPONENT: "# Generator improved\n\nWrite edge cases explicitly."
+    }
+    assert len(llm.typed_calls) == 1
+    assert "ROLE: generator" in llm.typed_calls[0][1]
+    assert "GEPA selected generator_prompt" in llm.typed_calls[0][1]

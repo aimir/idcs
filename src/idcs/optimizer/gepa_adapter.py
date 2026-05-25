@@ -13,6 +13,7 @@ The import of GEPA itself is lazy so this file remains testable without adding
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -23,6 +24,7 @@ from idcs.distinguisher import Distinguisher
 from idcs.generator import Generator
 from idcs.llm import BudgetExceededError, LLMClient
 from idcs.optimizer.coevolve import _format_failure_summaries, _hash_prompt
+from idcs.optimizer.mutate import Mutator
 from idcs.orchestrator import run_episode
 from idcs.rewards import RewardWeights, compute_reward_breakdown
 from idcs.schemas import RewardBreakdown, Task, Trace
@@ -168,6 +170,36 @@ class IDCSGepaAdapter:
                 for trajectory in trajectories
             ]
         return dataset
+
+    def propose_new_texts(
+        self,
+        candidate: dict[str, str],
+        reflective_dataset: Mapping[str, Sequence[Mapping[str, Any]]],
+        components_to_update: list[str],
+    ) -> dict[str, str]:
+        """Use IDCS' existing mutator as GEPA's proposal hook.
+
+        This lets ``scripts/train_gepa.py`` run with the local Codex backend
+        alone, without requiring a second provider key for GEPA's default
+        reflection LM. GEPA still owns selection and frontier tracking; this
+        method only proposes replacement text for the requested components.
+        """
+
+        mutator = Mutator(self.llm)
+        proposed: dict[str, str] = {}
+        for component in components_to_update:
+            current_text = candidate.get(component)
+            if current_text is None:
+                continue
+            feedback = _proposal_feedback(component, reflective_dataset.get(component, []))
+            mutations = mutator.mutate(
+                current_text,
+                feedback,
+                role=_component_role(component),
+                count=1,
+            )
+            proposed[component] = mutations[0] if mutations else current_text
+        return proposed
 
     def _evaluate_task(
         self,
@@ -380,6 +412,35 @@ def _component_guidance(component: str) -> str:
     if component == CODER_COMPONENT:
         return "Improve the coder prompt without hiding task-specific lookup rules in it."
     return "Improve this text component while preserving its role."
+
+
+def _component_role(component: str) -> str:
+    if component == GENERATOR_COMPONENT:
+        return "generator"
+    if component == DISTINGUISHER_COMPONENT:
+        return "distinguisher"
+    if component == CODER_COMPONENT:
+        return "coder"
+    return component
+
+
+def _proposal_feedback(
+    component: str,
+    records: Sequence[Mapping[str, Any]],
+) -> str:
+    if not records:
+        return (
+            f"GEPA selected {component} for mutation but no reflective records "
+            "were available. Make a conservative, role-preserving improvement."
+        )
+    serialized = json.dumps(list(records), indent=2, ensure_ascii=False, default=str)
+    return (
+        f"GEPA selected {component} for mutation based on these reflective "
+        "records. Improve the prompt to address recurring failures and reward "
+        "signals. Preserve the role and schema contract. Do not encode task ids, "
+        "exact hidden inputs, or lookup tables.\n\n"
+        f"{_truncate(serialized, 6000)}"
+    )
 
 
 def _issues_by_turn(trace: Trace | None) -> list[dict[str, Any]]:
