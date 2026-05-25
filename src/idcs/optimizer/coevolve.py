@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import json
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
 
-from idcs.benchmark.scoring import score
+from idcs.benchmark.scoring import FailureExample, ScoreResult, score, score_detailed
 from idcs.coder import Coder
 from idcs.distinguisher import Distinguisher
 from idcs.generator import Generator
@@ -127,6 +128,7 @@ def coevolve(
         _write_config_snapshot(
             run_dir,
             llm=llm,
+            mutator_llm=mutator_llm,
             config=config,
             weights=weights,
             train_tasks=tasks,
@@ -267,6 +269,7 @@ def _write_config_snapshot(
     run_dir: Path,
     *,
     llm: LLMClient,
+    mutator_llm: LLMClient | None,
     config: CoevolveConfig,
     weights: RewardWeights,
     train_tasks: list[Task],
@@ -279,8 +282,12 @@ def _write_config_snapshot(
     which tasks, which baselines. Without this snapshot, traces and metrics
     are uninterpretable a week later.
     """
+    main_model = getattr(llm, "model", None)
     snapshot = {
-        "model": getattr(llm, "model", None),
+        "model": main_model,
+        "mutator_model": (
+            getattr(mutator_llm, "model", None) if mutator_llm is not None else main_model
+        ),
         "weights": dataclasses.asdict(weights),
         "config": dataclasses.asdict(config),
         "train_task_ids": [t.id for t in train_tasks],
@@ -451,6 +458,7 @@ def _write_population_snapshot(
                 "avg_regression_penalty": (
                     mean(b.regression_penalty for b in breakdowns) if breakdowns else None
                 ),
+                "failure_summaries": candidate.failure_summaries[:8],
                 "prompt": candidate.prompt,
             }
         )
@@ -480,6 +488,7 @@ def _evaluate_candidate(
     # the opponent population.
     opponent_prompt = _sample_opponent(opponent_population, rng)
     breakdowns: list[RewardBreakdown] = []
+    failure_summaries: list[str] = []
     rewards: list[float] = []
     for i, task in enumerate(tasks, 1):
         generator_prompt = candidate.prompt if role == "generator" else opponent_prompt
@@ -493,7 +502,10 @@ def _evaluate_candidate(
             trace = run_episode(task, generator, distinguisher, user, max_turns=config.max_turns)
             trace.generator_prompt_hash = _hash_prompt(generator_prompt)
             trace.distinguisher_prompt_hash = _hash_prompt(distinguisher_prompt)
-            benchmark = _score_trace(task, trace, coder)
+            score_result = _score_trace_detailed(task, trace, coder)
+            benchmark = score_result.pass_rate
+            task_failure_summaries = _format_failure_summaries(task, score_result)
+            failure_summaries.extend(task_failure_summaries)
             trace.benchmark_score = benchmark
             breakdown = compute_reward_breakdown(
                 trace,
@@ -516,6 +528,7 @@ def _evaluate_candidate(
             )
             error_type = type(exc).__name__
             error_message = str(exc)
+            task_failure_summaries = [f"{task.id}: scoring error: {error_message}"]
             trace = None
             log.warning(
                 "      task %d/%d %s failed for %s candidate %s: %s: %s",
@@ -555,18 +568,81 @@ def _evaluate_candidate(
             if error_type is not None:
                 metrics["error_type"] = error_type
                 metrics["error_message"] = error_message[:500] if error_message else ""
+            if task_failure_summaries:
+                metrics["failure_summaries"] = task_failure_summaries[:3]
             write_metrics(run_dir, metrics)
 
     candidate.reward = mean(rewards) if rewards else 0.0
     candidate.breakdowns = breakdowns
+    candidate.failure_summaries = failure_summaries[:8]
     return candidate
 
 
 def _score_trace(task: Task, trace: Trace, coder: Coder) -> float:
+    return _score_trace_detailed(task, trace, coder).pass_rate
+
+
+def _score_trace_detailed(task: Task, trace: Trace, coder: Coder) -> ScoreResult:
     if trace.final_spec is None:
-        return 0.0
+        return ScoreResult(0, 0, 0.0, errors=["no final spec"])
     code = coder.from_spec(trace.final_spec, task.prompt)
-    return score(task, code)
+    return score_detailed(task, code)
+
+
+def _format_failure_summaries(task: Task, result: ScoreResult) -> list[str]:
+    if result.pass_count == result.total_count:
+        return []
+    summaries: list[str] = []
+    for example in result.failure_examples[:3]:
+        actual = example.actual_repr if example.actual_repr is not None else example.error
+        hint = _failure_hint(example)
+        hint_suffix = f"; hint={hint}" if hint else ""
+        summaries.append(
+            f"{task.id}: plus score {result.pass_count}/{result.total_count}; "
+            f"input={example.input_repr}; expected={example.expected_repr}; "
+            f"actual={actual}{hint_suffix}"
+        )
+    if summaries:
+        return summaries
+    if result.errors:
+        return [f"{task.id}: scoring error: {result.errors[0]}"]
+    return [f"{task.id}: plus score {result.pass_count}/{result.total_count}"]
+
+
+def _failure_hint(example: FailureExample) -> str | None:
+    expected = _literal_eval_repr(example.expected_repr)
+    actual = _literal_eval_repr(example.actual_repr)
+    if not isinstance(expected, str) or not isinstance(actual, str):
+        return None
+
+    hints: list[str] = []
+    if expected and _is_subsequence(expected, actual) and expected != actual:
+        hints.append("expected is a filtered subsequence of actual")
+    if expected and expected.isalpha() and expected.islower():
+        hints.append("expected contains only lowercase alphabetic characters")
+    extra_chars = {char for char in actual if char not in expected}
+    if any(not char.isalnum() for char in extra_chars):
+        hints.append("actual preserved punctuation/symbols absent from expected")
+    if any(char.isupper() for char in extra_chars):
+        hints.append("actual preserved uppercase letters absent from expected")
+    if not hints:
+        return None
+    return "; ".join(hints)
+
+
+def _literal_eval_repr(value: str | None) -> object | None:
+    if value is None:
+        return None
+    try:
+        parsed: object = ast.literal_eval(value)
+        return parsed
+    except (SyntaxError, ValueError):
+        return None
+
+
+def _is_subsequence(needle: str, haystack: str) -> bool:
+    iterator = iter(haystack)
+    return all(char in iterator for char in needle)
 
 
 def _sample_opponent(population: Population, rng: random.Random) -> str:
@@ -600,6 +676,17 @@ def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
     avg_spec_penalty = mean(b.spec_complexity_penalty for b in candidate.breakdowns)
     avg_benchmark_delta = mean(b.benchmark_delta for b in candidate.breakdowns)
     avg_regression_penalty = mean(b.regression_penalty for b in candidate.breakdowns)
+    failure_feedback = ""
+    if candidate.failure_summaries:
+        examples = "\n".join(
+            f"- {summary}" for summary in candidate.failure_summaries[:5]
+        )
+        failure_feedback = (
+            " Concrete failed hidden-test examples to learn from:\n"
+            f"{examples}\n"
+            "Turn these into reusable semantic rules in the next prompt; "
+            "do not merely mention the individual inputs."
+        )
 
     if role == "generator":
         return (
@@ -613,7 +700,7 @@ def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
             f"avg spec complexity penalty={avg_spec_penalty:.3f} "
             f"(avoid empty / thin specs). Improve by producing specs "
             f"concrete enough that D has fewer gaps to flag, without "
-            f"dropping benchmark score."
+            f"dropping benchmark score.{failure_feedback}"
         )
     return (
         f"Distinguisher results over {n} tasks. "
@@ -630,6 +717,7 @@ def _summarize_feedback(candidate: PromptCandidate, role: str) -> str:
         f"(positive means your questions improved the spec). "
         f"Improve by raising issues G will accept and asking only "
         f"genuinely useful user-routed questions (cap is 5/episode)."
+        f"{failure_feedback}"
     )
 
 

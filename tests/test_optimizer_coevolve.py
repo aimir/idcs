@@ -5,9 +5,11 @@ import random
 
 from pydantic import BaseModel
 
+from idcs.benchmark.scoring import FailureExample, ScoreResult
 from idcs.optimizer.coevolve import (
     CoevolveConfig,
     _evaluate_candidate,
+    _format_failure_summaries,
     _summarize_feedback,
     coevolve,
 )
@@ -242,6 +244,9 @@ def test_candidate_evaluation_records_failure_without_crashing(tmp_path) -> None
             "llm_structured_fallback_count": 0,
             "error_type": "RuntimeError",
             "error_message": "malformed structured output",
+            "failure_summaries": [
+                "seed/coevolve-add: scoring error: malformed structured output"
+            ],
         }
     ]
 
@@ -261,9 +266,37 @@ def test_mutation_feedback_includes_delta_and_regression_terms() -> None:
                 regression_penalty=0.1,
             ),
         ],
+        failure_summaries=[
+            "Mbpp/459: plus score 12/50; input=['AbC']; expected='b'; actual='AbC'"
+        ],
     )
 
     feedback = _summarize_feedback(candidate, "generator")
 
     assert "avg benchmark delta vs direct baseline=0.050" in feedback
     assert "avg regression penalty=0.050" in feedback
+    assert "Concrete failed hidden-test examples" in feedback
+    assert "Mbpp/459: plus score 12/50" in feedback
+    assert "Turn these into reusable semantic rules" in feedback
+
+
+def test_failure_summary_adds_string_filter_hint() -> None:
+    task = Task(id="Mbpp/459", prompt="", entry_point="remove_uppercase", tests=[])
+    result = ScoreResult(
+        pass_count=25,
+        total_count=103,
+        pass_rate=25 / 103,
+        failure_examples=[
+            FailureExample(
+                input_repr="['ThiS%^%!s&a(mY)TesTStR%i*ng']",
+                expected_repr="'hisamesting'",
+                actual_repr="'hi%^%!s&a(m)est%i*ng'",
+            )
+        ],
+    )
+
+    summary = _format_failure_summaries(task, result)[0]
+
+    assert "expected is a filtered subsequence of actual" in summary
+    assert "expected contains only lowercase alphabetic characters" in summary
+    assert "actual preserved punctuation/symbols absent from expected" in summary
