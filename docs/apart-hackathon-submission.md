@@ -12,7 +12,7 @@ AI coding systems often fail for a simple reason: the user request is not a full
 
 Our prototype separates the workflow into four roles: a generator drafts a structured specification from the user request, a distinguisher critiques missing or ambiguous behavior, a user proxy answers clarification questions when needed, and a coder writes the final implementation from the refined spec. We evaluate the pipeline against direct code generation on MBPP+ tasks selected for hidden edge semantics rather than algorithmic difficulty.
 
-On an initial five-task hard MBPP+ `plus_input` slice, direct Codex-mini generation failed perfect hidden-edge scoring on all 5 tasks. The generated-spec pipeline rescued 1 of the 5 tasks with no regressions, improving aggregate `plus_input` pass rate from 110/531 tests, or 20.7%, to 179/531 tests, or 33.7%. A separate hardened proof-of-concept dataset showed that oracle specifications can solve cases that direct generation misses, but generated specifications still need improvement.
+On an initial five-task hard MBPP+ `plus_input` slice, direct Codex-mini generation failed perfect hidden-edge scoring on all 5 tasks. The generated-spec pipeline rescued 1 of the 5 tasks with no regressions, improving aggregate `plus_input` pass rate from 110/531 tests, or 20.7%, to 179/531 tests, or 33.7%. A deliberately hard-slice-specific diagnostic prompt later reached 531/531 hidden tests, rescuing all 5 tasks. We treat that as a ceiling proof, not a general benchmark claim: it shows the pipeline can win when the missing semantics are captured in the spec, while automatic spec discovery still needs improvement.
 
 The main takeaway is modest but useful: hidden-edge benchmarks reveal real headroom for specification-guided coding, and the next bottleneck is not code generation itself but automatically evolving prompts that elicit and validate the right specification.
 
@@ -250,6 +250,39 @@ pass count on `Mbpp/597`. The lesson is that the optimizer is finding useful
 behavior, but future selection should optimize larger task samples or include a
 stronger anti-regression term.
 
+### 4.5 Diagnostic Ceiling Prompt
+
+After inspecting the remaining failures, we added an explicit diagnostic prompt
+pair for the named hard MBPP+ slice:
+
+- `prompts/hard_mbpp_rules_generator_v0.md`
+- `prompts/hard_mbpp_rules_distinguisher_v0.md`
+
+These prompts intentionally encode the observed EvalPlus reference semantics
+for the five hard task patterns. They are not the default prompts and should not
+be read as a broad generalization result. Their purpose is to answer a narrower
+ceiling question: if the exact hidden semantics are represented in the spec
+prompt, can the current IDCS pipeline turn that into correct code?
+
+The answer was yes.
+
+**Table 5. Diagnostic hard-slice ceiling result.**
+
+| Task | Function | Direct plus pass rate | Spec-guided plus pass rate |
+| --- | --- | ---: | ---: |
+| `Mbpp/639` | `sample_nam` | 2/111 = 1.8% | 111/111 = 100.0% |
+| `Mbpp/597` | `find_kth` | 39/104 = 37.5% | 104/104 = 100.0% |
+| `Mbpp/427` | `change_date_format` | 3/112 = 2.7% | 112/112 = 100.0% |
+| `Mbpp/92` | `is_undulating` | 32/101 = 31.7% | 101/101 = 100.0% |
+| `Mbpp/459` | `remove_uppercase` | 25/103 = 24.3% | 103/103 = 100.0% |
+| **Total** | 5 tasks | **101/531 = 19.0%** | **531/531 = 100.0%** |
+
+This result is important but easy to overstate. It does not prove that IDCS has
+learned general specification elicitation. It proves that, on this hard slice,
+the current architecture can produce perfect code when the prompt/spec layer
+contains the hidden behavior. The next research target is making coevolution
+discover these semantic rules automatically.
+
 ## 5. Discussion and Limitations
 
 The main result is directional. IDCS does not yet prove that spec-guided coding broadly beats direct coding. It shows something narrower and useful:
@@ -269,7 +302,13 @@ The benchmark is still Python-only and unit-test-based. It does not yet cover me
 
 The user-proxy component is currently a simplification. In real specification elicitation, a human stakeholder may answer inconsistently, reject a proposed interpretation, or reveal new constraints late in the process.
 
-The current generated-spec loop still fails on most hard tasks. The result should not be read as "IDCS solved specification elicitation." It should be read as "we found a benchmark where specifications matter, and the pipeline already has a measurable but incomplete advantage."
+The current generated-spec loop still fails on most hard tasks when it uses
+general evolved prompts. The diagnostic ceiling prompt solves the full hard
+slice, but it does so by explicitly encoding the five task patterns. The result
+should not be read as "IDCS solved specification elicitation." It should be read
+as "we found a benchmark where specifications matter, proved the pipeline can
+exploit correct hidden semantics, and identified automatic discovery of those
+semantics as the next bottleneck."
 
 OpenRouter-based Haiku runs were blocked locally by insufficient credits on the provided key, so the final coevolution evidence uses the local Codex backend. The local run produced one transferable full-slice rescue, but it also showed that sampled reward can select prompt pairs with partial-score regressions. This makes anti-regression validation part of the core method, not a polish detail.
 
@@ -285,11 +324,18 @@ Finally, we should move toward security-shaped tasks: access-control decisions, 
 
 ## 6. Conclusion
 
-IDCS is a prototype for testing whether specification work can make AI-written code safer and more correct. The early evidence says yes in a limited but meaningful sense: on a hard MBPP+ slice selected for hidden edge semantics, direct generation failed all five tasks on perfect `plus_input` scoring, while the spec-guided path rescued one task and improved aggregate hidden-test pass rate from 20.7% to 33.7% without task-level regressions.
+IDCS is a prototype for testing whether specification work can make AI-written code safer and more correct. The early evidence says yes in a limited but meaningful sense: on a hard MBPP+ slice selected for hidden edge semantics, direct generation failed all five tasks on perfect `plus_input` scoring, while the general spec-guided path rescued one task and improved aggregate hidden-test pass rate from 20.7% to 33.7% without task-level regressions.
 
 The coevolution result makes the story more useful. Starting from seed prompts, the optimizer found observed generator/distinguisher pairs that transfer to the full hard slice, again rescuing `Mbpp/92` with no task-level regression. The result is not yet robust enough to claim broad improvement because some pairs worsen partial pass counts elsewhere. But it shows the intended loop working: prompts can be evolved, evaluated, inspected, and validated against hidden edge behavior.
 
-The stronger lesson is about evaluation. If the benchmark is too easy, direct code generation looks solved and the value of specs disappears. Once the benchmark contains realistic underspecification, there is measurable headroom. The next step is to make coevolution optimize that headroom more reliably, with larger task samples and stronger regression penalties.
+The diagnostic ceiling prompt sharpens that lesson: once the hidden semantics
+are represented in the spec layer, the same pipeline can reach 531/531 hidden
+tests on this slice. The stronger lesson is about evaluation. If the benchmark
+is too easy, direct code generation looks solved and the value of specs
+disappears. Once the benchmark contains realistic underspecification, there is
+measurable headroom. The next step is to make coevolution optimize that headroom
+more reliably, with larger task samples, stronger regression penalties, and
+held-out validation.
 
 ## Code and Data
 
@@ -299,6 +345,8 @@ The stronger lesson is about evaluation. If the benchmark is too easy, direct co
 - **Verified hard-slice baseline artifact:** `/private/tmp/idcs-hard-batch-current-mt3/summary.json` and `/private/tmp/idcs-hard-batch-current-mt3/results.jsonl`
 - **Final coevolution run artifact:** `experiments/runs/20260524T185513Z/`
 - **Full-slice observed-pair validations:** `/tmp/idcs-pair1-best-trace-full-hard/`, `/tmp/idcs-pair3-final-best-full-hard/`, and `/tmp/idcs-pair2-repeated-92-full-hard/`
+- **Diagnostic ceiling prompts:** `prompts/hard_mbpp_rules_generator_v0.md` and `prompts/hard_mbpp_rules_distinguisher_v0.md`
+- **Diagnostic ceiling run artifact:** `experiments/runs/hard-rules-v0-repo-mt2-20260525T003333Z/`
 
 ## Author Contributions
 
@@ -385,6 +433,23 @@ uv run --no-project --with '.[dev]' python scripts/batch_baseline.py \
   --generator-prompt-file /tmp/idcs-observed-pairs/pair1_best_trace/generator.md \
   --distinguisher-prompt-file /tmp/idcs-observed-pairs/pair1_best_trace/distinguisher.md \
   --run-dir /tmp/idcs-pair1-best-trace-full-hard
+```
+
+Diagnostic hard-slice ceiling run:
+
+```bash
+IDCS_BACKEND=codex \
+IDCS_CODEX_MODEL=gpt-5.4-mini \
+IDCS_CODEX_SERVICE_TIER=fast \
+IDCS_CODEX_REASONING_EFFORT=none \
+IDCS_CODEX_TIMEOUT_S=300 \
+uv run --no-project --with '.[dev]' python scripts/batch_baseline.py \
+  --dataset hard \
+  --workers 5 \
+  --retries 0 \
+  --max-turns 2 \
+  --generator-prompt-file prompts/hard_mbpp_rules_generator_v0.md \
+  --distinguisher-prompt-file prompts/hard_mbpp_rules_distinguisher_v0.md
 ```
 
 ### C. What Would Count as Stronger Evidence?
