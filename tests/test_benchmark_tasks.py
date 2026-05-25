@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from idcs.benchmark.tasks import load_mbpp_plus
+from idcs.benchmark.tasks import (
+    HARD_MBPP_PLUS_IDS,
+    load_benchmark_tasks,
+    load_mbpp_hard,
+    load_mbpp_plus,
+)
 
 
 def test_normalizes_to_task_schema() -> None:
@@ -65,3 +70,58 @@ def test_skips_non_assert_lines() -> None:
         tasks = load_mbpp_plus()
 
     assert [t.code for t in tasks[0].tests] == ["assert f(1) == 1", "assert f(2) == 2"]
+
+
+def test_load_mbpp_plus_can_keep_explicit_id_order() -> None:
+    fake = {
+        "Mbpp/1": _fake_evalplus_problem("one"),
+        "Mbpp/2": _fake_evalplus_problem("two"),
+    }
+    with patch("evalplus.data.get_mbpp_plus", return_value=fake):
+        tasks = load_mbpp_plus(task_ids=["Mbpp/2", "Mbpp/1"])
+
+    assert [task.id for task in tasks] == ["Mbpp/2", "Mbpp/1"]
+
+
+def test_hard_slice_loads_intended_mbpp_plus_ids() -> None:
+    fake = {
+        task_id: _fake_evalplus_problem(task_id.replace("/", "_"))
+        for task_id in HARD_MBPP_PLUS_IDS
+    }
+    with patch("evalplus.data.get_mbpp_plus", return_value=fake):
+        tasks = load_mbpp_hard(max_plus_inputs=2)
+
+    assert [task.id for task in tasks] == list(HARD_MBPP_PLUS_IDS)
+    assert all(task.id.startswith("Mbpp/") for task in tasks)
+
+
+def test_hard_slice_includes_base_and_plus_hidden_tests() -> None:
+    fake = {
+        task_id: _fake_evalplus_problem(task_id.replace("/", "_"))
+        for task_id in HARD_MBPP_PLUS_IDS
+    }
+    with patch("evalplus.data.get_mbpp_plus", return_value=fake):
+        task = load_benchmark_tasks("hard", max_plus_inputs=2)[0]
+
+    assert [test.id for test in task.tests] == [
+        f"{task.id}/base-inputs",
+        f"{task.id}/plus-inputs",
+    ]
+    assert "_IDCS_ORACLE_SRC" in task.tests[0].code
+    assert "_IDCS_CASES = [[1], [2]]" in task.tests[0].code
+    assert "_IDCS_CASES = [[3], [4]]" in task.tests[1].code
+    assert "[5]" not in task.tests[1].code
+
+
+def _fake_evalplus_problem(name: str) -> dict[str, object]:
+    entry_point = f"identity_{name}".replace("-", "_")
+    return {
+        "task_id": name,
+        "prompt": f'"""\nReturn the input for {name}.\n"""',
+        "entry_point": entry_point,
+        "assertion": f"assert {entry_point}(1) == 1",
+        "canonical_solution": f"def {entry_point}(x):\n    return x\n",
+        "base_input": [[1], [2]],
+        "plus_input": [[3], [4], [5]],
+        "atol": 0.0,
+    }
