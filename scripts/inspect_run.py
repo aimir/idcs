@@ -53,6 +53,7 @@ def _print_config(run_dir: Path) -> None:
     print(f"pop/elite:    {config.get('population_size')}/{config.get('elite_size')}  "
           f"epochs={config.get('epochs')}  max_turns={config.get('max_turns')}  "
           f"task_sample={config.get('task_sample_size')}")
+    print(f"selection:    {config.get('elite_selection', 'mean')}")
     train_ids = cfg.get("train_task_ids", [])
     val_ids = cfg.get("val_task_ids", [])
     print(f"tasks:        {len(train_ids)} train, {len(val_ids)} val")

@@ -21,7 +21,15 @@ import random
 from collections.abc import Callable
 
 from idcs._prompts import load_prompt  # noqa: E402
-from idcs.benchmark.tasks import load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.llm import LLM, BudgetExceededError  # noqa: E402
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
@@ -36,7 +44,20 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--benchmark", choices=["mbpp", "hard", "seed"], default="mbpp")
+    parser.add_argument(
+        "--benchmark",
+        choices=[
+            "mbpp",
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+            "seed",
+        ],
+        default="mbpp",
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--sample", type=int, default=None)
@@ -45,6 +66,21 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--pop-size", type=int, default=8)
     parser.add_argument("--elite-size", type=int, default=3)
+    parser.add_argument(
+        "--elite-selection",
+        choices=["task_pareto", "mean"],
+        default="task_pareto",
+        help=(
+            "How to keep prompts between epochs. task_pareto preserves "
+            "specialists that are best on individual tasks; mean keeps the "
+            "older average-reward top-k behavior."
+        ),
+    )
+    parser.add_argument(
+        "--drop-anchor",
+        action="store_true",
+        help="Allow evolution to discard the original handwritten prompts.",
+    )
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--task-sample", type=int, default=None)
     parser.add_argument("--no-telemetry", action="store_true")
@@ -120,7 +156,8 @@ def main() -> int:
         user_factory = seed_user_factory
 
     else:
-        tasks = load_benchmark_tasks("hard" if args.benchmark == "hard" else "mbpp")
+        dataset = MBPP_PLUS_DATASET if args.benchmark == "mbpp" else args.benchmark
+        tasks = load_benchmark_tasks(dataset)
 
         def null_user_factory(task: Task) -> UserProxy:
             return NullUserProxy()
@@ -159,6 +196,8 @@ def main() -> int:
     config = CoevolveConfig(
         population_size=args.pop_size,
         elite_size=args.elite_size,
+        elite_selection=args.elite_selection,
+        keep_anchor=not args.drop_anchor,
         epochs=args.epochs,
         max_turns=args.max_turns,
         task_sample_size=args.task_sample,

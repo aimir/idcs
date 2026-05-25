@@ -34,7 +34,15 @@ from threading import Lock
 from typing import Any
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
-from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.coder import Coder  # noqa: E402
 from idcs.llm import LLM  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
@@ -160,7 +168,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset",
-        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        choices=[
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+        ],
         default=HARD_DATASET,
     )
     parser.add_argument("--limit", type=int, default=None)

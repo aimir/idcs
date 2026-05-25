@@ -80,7 +80,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--benchmark", choices=["mbpp", "hard", "seed"], default="hard")
+    parser.add_argument(
+        "--benchmark",
+        choices=[
+            "mbpp",
+            "mbpp-plus",
+            "hard",
+            "hard-extended",
+            "hard-train",
+            "hard-dev",
+            "hard-test",
+            "seed",
+        ],
+        default="hard",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", default=[2026052501, 2026052502])
     parser.add_argument("--jobs", type=int, default=None)
     parser.add_argument("--model", type=str, default="gpt-5.5")
@@ -96,6 +109,16 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--pop-size", type=int, default=3)
     parser.add_argument("--elite-size", type=int, default=1)
+    parser.add_argument(
+        "--elite-selection",
+        choices=["task_pareto", "mean"],
+        default="task_pareto",
+    )
+    parser.add_argument(
+        "--drop-anchor",
+        action="store_true",
+        help="Allow evolution to discard the original handwritten prompts.",
+    )
     parser.add_argument("--max-turns", type=int, default=2)
     parser.add_argument("--task-sample", type=int, default=2)
     parser.add_argument("--val-fraction", type=float, default=0.0)
@@ -150,6 +173,8 @@ def _train_command(args: argparse.Namespace, seed: int) -> list[str]:
         str(args.pop_size),
         "--elite-size",
         str(args.elite_size),
+        "--elite-selection",
+        args.elite_selection,
         "--max-turns",
         str(args.max_turns),
         "--model",
@@ -157,6 +182,8 @@ def _train_command(args: argparse.Namespace, seed: int) -> list[str]:
         "--mutator-model",
         args.mutator_model or args.model,
     ]
+    if args.drop_anchor:
+        command.append("--drop-anchor")
     _append_optional(command, "--limit", args.limit)
     _append_optional(command, "--offset", args.offset)
     _append_optional(command, "--sample", args.sample)
