@@ -1,0 +1,57 @@
+{
+  "task": {
+    "id": "candidate/policy/004-is-feature-enabled",
+    "prompt": "Write a function `is_feature_enabled(user, flag)` that decides whether a feature flag is enabled for a user.",
+    "entry_point": "is_feature_enabled",
+    "tests": [
+      {"id": "candidate/policy/004/t0", "code": "assert is_feature_enabled({'id': 'u1', 'region': 'us'}, {'enabled': True, 'allow_users': ['u1']}) is True"},
+      {"id": "candidate/policy/004/t1", "code": "assert is_feature_enabled({'id': 'u1', 'region': 'us'}, {'enabled': True, 'kill_switch': True, 'allow_users': ['u1']}) is False"},
+      {"id": "candidate/policy/004/t2", "code": "assert is_feature_enabled({'id': 'u1', 'region': 'us'}, {'enabled': True, 'allow_users': ['u1'], 'deny_users': ['u1']}) is False"},
+      {"id": "candidate/policy/004/t3", "code": "assert is_feature_enabled({'id': 'u2', 'region': 'eu', 'groups': ['beta']}, {'enabled': True, 'allowed_groups': ['beta'], 'blocked_regions': ['eu']}) is False"},
+      {"id": "candidate/policy/004/t4", "code": "assert is_feature_enabled({'id': 'staff1', 'region': 'us', 'is_internal': True}, {'enabled': True, 'internal_only': True}) is True"},
+      {"id": "candidate/policy/004/t5", "code": "assert is_feature_enabled({'id': 'u3', 'region': 'us', 'groups': ['beta']}, {'enabled': True, 'internal_only': True, 'allowed_groups': ['beta']}) is False"},
+      {"id": "candidate/policy/004/t6", "code": "assert is_feature_enabled({'id': 'u9', 'region': 'us'}, {'enabled': True, 'rollout_percent': 10}) is False"},
+      {"id": "candidate/policy/004/t7", "code": "assert is_feature_enabled({'id': 'aa', 'region': 'us'}, {'enabled': True, 'rollout_percent': 95}) is True"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Evaluate a feature flag for a user using deterministic policy precedence.",
+    "inputs": [
+      {"name": "user", "type": "dict", "description": "user attributes", "constraints": []},
+      {"name": "flag", "type": "dict", "description": "feature-flag configuration", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "enabled", "type": "bool", "description": "whether the feature is enabled for this user", "constraints": []}
+    ],
+    "preconditions": ["Inputs are dictionaries."],
+    "postconditions": [
+      "Return False unless flag['enabled'] is exactly True.",
+      "Return False if flag['kill_switch'] is True; kill_switch overrides every allow mechanism.",
+      "Return False if user has no non-empty id.",
+      "Return False if the user id appears in flag['deny_users']; deny_users overrides allow_users, groups, internal access, and rollout.",
+      "Return False if user['region'] appears in flag['blocked_regions']; blocked regions override allow_users, groups, internal access, and rollout.",
+      "If flag['internal_only'] is True, return True only when user['is_internal'] is exactly True and no previous deny rule applied.",
+      "If internal_only is not True and the user id appears in flag['allow_users'], return True.",
+      "If internal_only is not True and any value in user['groups'] appears in flag['allowed_groups'], return True.",
+      "For rollout_percent, treat missing value as 0, clamp values below 0 to 0 and above 100 to 100, and compute bucket as sum(ord(ch) for ch in user id) modulo 100. Return True only when bucket is less than rollout_percent.",
+      "Treat missing deny_users, blocked_regions, allow_users, allowed_groups, and user groups as empty lists.",
+      "Return False when no allow rule matches."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "A global kill switch disables the flag even for explicitly allowed users.",
+      "Blocked regions and explicit denies override every allow path.",
+      "For internal_only flags, group membership and explicit allow_users do not grant access to external users."
+    ],
+    "acceptance_criteria": [
+      "The function returns a boolean.",
+      "Rollout behavior is deterministic and independent of Python's randomized hash seed."
+    ]
+  },
+  "known_weakness": {
+    "type": "override_order",
+    "source": "feature-flag policy hardening",
+    "description": "The raw prompt looks like a typical feature-flag check, but subtle precedence rules make deny paths stronger than explicit allows and make internal_only exclude normal group rollout paths.",
+    "naive_spec_gap": "a naive model is likely to let allow_users or beta groups override deny lists, blocked regions, kill switches, or internal-only restrictions, and may use Python hash for rollout"
+  }
+}

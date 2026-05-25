@@ -1,0 +1,54 @@
+{
+  "task": {
+    "id": "candidate/data_shapes/002-stable-dedupe-records",
+    "prompt": "Write a function `dedupe_records(records)` that removes duplicate records from a list.",
+    "entry_point": "dedupe_records",
+    "tests": [
+      {"id": "candidate/data_shapes/002/t0", "code": "records = [{'id': 'a', 'value': 1}, {'id': 'b', 'value': 2}, {'id': 'a', 'value': 3}]\nassert dedupe_records(records) == [{'id': 'a', 'value': 3}, {'id': 'b', 'value': 2}]"},
+      {"id": "candidate/data_shapes/002/t1", "code": "records = [{'id': 'b', 'scope': 'x'}, {'id': 'a'}, {'id': 'b', 'scope': 'x', 'latest': True}, {'id': 'a', 'latest': True}]\nassert dedupe_records(records) == [{'id': 'b', 'scope': 'x', 'latest': True}, {'id': 'a', 'latest': True}]"},
+      {"id": "candidate/data_shapes/002/t2", "code": "records = [{'name': 'no-id'}, {'name': 'no-id'}, {'id': 'x'}, {'id': 'x', 'n': 2}]\nassert dedupe_records(records) == [{'name': 'no-id'}, {'name': 'no-id'}, {'id': 'x', 'n': 2}]"},
+      {"id": "candidate/data_shapes/002/t3", "code": "records = [{'id': 1, 'v': 'int'}, {'id': '1', 'v': 'str'}, {'id': 1, 'v': 'int-last'}]\nassert dedupe_records(records) == [{'id': 1, 'v': 'int-last'}, {'id': '1', 'v': 'str'}]"},
+      {"id": "candidate/data_shapes/002/t4", "code": "records = [{'id': 'a', 'scope': None, 'v': 1}, {'id': 'a', 'v': 2}, {'id': 'a', 'scope': 'default', 'v': 3}]\nassert dedupe_records(records) == [{'id': 'a', 'v': 2}, {'id': 'a', 'scope': 'default', 'v': 3}]"},
+      {"id": "candidate/data_shapes/002/t5", "code": "records = [{'id': 'z', 'v': 1}, {'id': 'a', 'v': 2}, {'id': 'z', 'v': 3}]\nout = dedupe_records(records)\nassert records == [{'id': 'z', 'v': 1}, {'id': 'a', 'v': 2}, {'id': 'z', 'v': 3}]\nassert out == [{'id': 'z', 'v': 3}, {'id': 'a', 'v': 2}]"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Remove duplicate keyed records while preserving the first-seen group order and keeping the last payload for each group.",
+    "inputs": [
+      {"name": "records", "type": "list[dict]", "description": "record dictionaries that may or may not contain id and scope keys", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "list[dict]", "description": "deduplicated records", "constraints": []}
+    ],
+    "preconditions": [
+      "Each item in records is a dict.",
+      "Values used for id and scope are hashable when present."
+    ],
+    "postconditions": [
+      "A record is keyed only if it has an 'id' key.",
+      "The duplicate key is the pair (record['id'], record.get('scope', None)).",
+      "Use normal Python equality for id and scope; do not stringify or case-normalize ids.",
+      "Records without an 'id' key are never duplicates of any other record and each remains as its own group.",
+      "For keyed duplicates, keep the full dict from the last record in that group.",
+      "Order output groups by the first input position where that group appeared.",
+      "Do not sort records by id or by any field.",
+      "Do not mutate the input list or record dictionaries."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "A missing scope and scope set to None are the same duplicate scope.",
+      "Two unkeyed records with identical contents both remain.",
+      "Integer id 1 and string id '1' are distinct keys."
+    ],
+    "acceptance_criteria": [
+      "This is not ordinary first-wins de-duplication.",
+      "This is not sorting; stable first-seen group order controls the output order."
+    ]
+  },
+  "known_weakness": {
+    "type": "dedupe_ordering",
+    "source": "manual data-shape hardening",
+    "description": "Models often implement first-wins de-duplication, sort by id, stringify ids, or drop records with missing ids.",
+    "naive_spec_gap": "missing duplicate key definition, last-wins payload rule, stable group ordering, and missing-id behavior"
+  }
+}

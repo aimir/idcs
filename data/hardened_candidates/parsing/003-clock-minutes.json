@@ -1,0 +1,53 @@
+{
+  "task": {
+    "id": "candidate/parsing/003-clock-minutes",
+    "prompt": "Write a function `clock_minutes(start, end)` that returns the minutes between two clock times.",
+    "entry_point": "clock_minutes",
+    "tests": [
+      {"id": "candidate/parsing/003/t0", "code": "assert clock_minutes('23:50', '00:10') == 20"},
+      {"id": "candidate/parsing/003/t1", "code": "assert clock_minutes('09:00', '09:00') == 0"},
+      {"id": "candidate/parsing/003/t2", "code": "assert clock_minutes('24:00', '00:30') == 30"},
+      {"id": "candidate/parsing/003/t3", "code": "assert clock_minutes('00:30', '24:00') == 1410"},
+      {"id": "candidate/parsing/003/t4", "code": "assert clock_minutes('7:05', '07:10') is None"},
+      {"id": "candidate/parsing/003/t5", "code": "assert clock_minutes('12:60', '13:00') is None"},
+      {"id": "candidate/parsing/003/t6", "code": "assert clock_minutes('24:01', '00:00') is None"},
+      {"id": "candidate/parsing/003/t7", "code": "assert clock_minutes('18:45', '18:44') == 1439"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Compute forward elapsed minutes on a simple 24-hour clock, with strict input normalization.",
+    "inputs": [
+      {"name": "start", "type": "str", "description": "start clock time", "constraints": []},
+      {"name": "end", "type": "str", "description": "end clock time", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "minutes", "type": "int | None", "description": "forward elapsed minutes, or None for invalid input", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Accept only strings exactly in HH:MM format with two digits, a colon, and two digits.",
+      "Valid normal times are 00:00 through 23:59.",
+      "Also accept the special value 24:00 and normalize it to 00:00.",
+      "Reject 24:01, hours above 24, minutes above 59, missing leading zeros, and non-string values by returning None.",
+      "Return the number of minutes moving forward from start to end on a 24-hour clock.",
+      "If end is earlier than start, wrap across midnight.",
+      "Equal normalized times return 0.",
+      "Do not use real dates, time zones, daylight saving time, or calendars."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "23:50 to 00:10 is 20 minutes.",
+      "00:30 to 24:00 is 1410 minutes because 24:00 normalizes to the next occurrence of 00:00 on the forward clock.",
+      "18:45 to 18:44 wraps and returns 1439."
+    ],
+    "acceptance_criteria": [
+      "Every valid result is an integer from 0 through 1439 inclusive."
+    ]
+  },
+  "known_weakness": {
+    "type": "calendarish_semantics",
+    "source": "manual time parsing hardening",
+    "description": "The raw prompt does not specify strict HH:MM parsing, 24:00 normalization, invalid-input handling, or forward wraparound semantics.",
+    "naive_spec_gap": "missing clock-only parsing and non-real-calendar rules"
+  }
+}

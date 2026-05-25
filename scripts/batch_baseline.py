@@ -29,11 +29,14 @@ from threading import Lock
 from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) in sys.path:
-    sys.path.remove(str(_SCRIPT_DIR))
+_SCRIPT_DIR_TEXT = str(_SCRIPT_DIR)
+while _SCRIPT_DIR_TEXT in sys.path:
+    sys.path.remove(_SCRIPT_DIR_TEXT)
 _SRC = _SCRIPT_DIR.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_SRC_TEXT = str(_SRC)
+while _SRC_TEXT in sys.path:
+    sys.path.remove(_SRC_TEXT)
+sys.path.insert(0, _SRC_TEXT)
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
 from idcs.benchmark.tasks import (  # noqa: E402
@@ -42,16 +45,18 @@ from idcs.benchmark.tasks import (  # noqa: E402
     HARD_EXTENDED_DATASET,
     HARD_TEST_DATASET,
     HARD_TRAIN_DATASET,
+    HARDENED_DATASET,
     MBPP_PLUS_DATASET,
     load_benchmark_tasks,
+    load_hardened_items,
 )
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
 from idcs.llm import LLM, runtime_snapshot  # noqa: E402
 from idcs.orchestrator import run_episode  # noqa: E402
-from idcs.schemas import Task  # noqa: E402
-from idcs.user_proxy import NullUserProxy  # noqa: E402
+from idcs.schemas import Spec, Task  # noqa: E402
+from idcs.user_proxy import NullUserProxy, OracleUserProxy  # noqa: E402
 
 
 @dataclass
@@ -60,7 +65,11 @@ class Counters:
     errors: int = 0
     direct_failed: int = 0
     spec_failed: int = 0
+    clarified_failed: int = 0
+    gold_failed: int = 0
     rescued: int = 0
+    generated_rescued: int = 0
+    gold_rescued: int = 0
     regressed: int = 0
     both_failed: int = 0
     direct_pass_count: int = 0
@@ -72,8 +81,15 @@ class Counters:
     partial_unchanged: int = 0
 
 
-def _select_tasks(args: argparse.Namespace) -> list[Task]:
-    tasks = load_benchmark_tasks(args.dataset)
+def _select_tasks(args: argparse.Namespace) -> tuple[list[Task], dict[str, Spec]]:
+    if args.dataset == HARDENED_DATASET:
+        hardened_items = load_hardened_items(args.hardened_dir)
+        tasks = [item.task for item in hardened_items]
+        gold_specs = {item.task.id: item.gold_spec for item in hardened_items}
+    else:
+        tasks = load_benchmark_tasks(args.dataset)
+        gold_specs = {}
+
     if args.tasks:
         wanted = set(args.tasks)
         tasks = [task for task in tasks if task.id in wanted]
@@ -84,7 +100,8 @@ def _select_tasks(args: argparse.Namespace) -> list[Task]:
         tasks = rng.sample(tasks, min(args.sample, len(tasks)))
     if args.limit:
         tasks = tasks[: args.limit]
-    return tasks
+    selected_ids = {task.id for task in tasks}
+    return tasks, {task_id: spec for task_id, spec in gold_specs.items() if task_id in selected_ids}
 
 
 def _score_payload(result: Any) -> dict[str, Any]:
@@ -114,6 +131,7 @@ def _run_one(
     generator_prompt: str | None,
     distinguisher_prompt: str | None,
     coder_prompt: str | None,
+    gold_spec: Spec | None = None,
 ) -> dict[str, Any]:
     started = time.time()
     llm = LLM()
@@ -138,16 +156,45 @@ def _run_one(
     spec_code = coder.from_spec(trace.final_spec, task.prompt)
     spec_score = score_detailed(task, spec_code)
 
-    return {
+    result = {
         "task_id": task.id,
         "entry_point": task.entry_point,
         "direct": _score_payload(direct_score),
         "spec_guided": _score_payload(spec_score),
+        "rescue_lane": "spec_guided",
         "turn_count": len(trace.turns),
         "issue_count": sum(len(turn.issues) for turn in trace.turns),
         "duration_s": round(time.time() - started, 3),
         "llm_calls_made": llm.calls_made,
     }
+    if gold_spec is not None:
+        oracle = OracleUserProxy(llm, gold_spec_text=gold_spec.model_dump_json(indent=2))
+        clarified_trace = run_episode(
+            task,
+            generator,
+            distinguisher,
+            oracle,
+            max_turns=max_turns,
+        )
+        if clarified_trace.final_spec is None:
+            raise RuntimeError("no clarified spec produced")
+        clarified_code = coder.from_spec(clarified_trace.final_spec, task.prompt)
+        clarified_score = score_detailed(task, clarified_code)
+        gold_code = coder.from_spec(gold_spec, task.prompt)
+        gold_score = score_detailed(task, gold_code)
+        result["clarified_spec"] = _score_payload(clarified_score)
+        result["gold_spec"] = _score_payload(gold_score)
+        result["rescue_lane"] = "clarified_spec"
+        result["clarified_turn_count"] = len(clarified_trace.turns)
+        result["clarified_issue_count"] = sum(
+            len(turn.issues) for turn in clarified_trace.turns
+        )
+        result["clarification_count"] = sum(
+            len(turn.user_answers) for turn in clarified_trace.turns
+        )
+        result["duration_s"] = round(time.time() - started, 3)
+        result["llm_calls_made"] = llm.calls_made
+    return result
 
 
 def _run_with_retries(
@@ -158,6 +205,7 @@ def _run_with_retries(
     generator_prompt: str | None,
     distinguisher_prompt: str | None,
     coder_prompt: str | None,
+    gold_spec: Spec | None = None,
 ) -> dict[str, Any]:
     errors: list[dict[str, str | int]] = []
     for attempt in range(retries + 1):
@@ -168,6 +216,7 @@ def _run_with_retries(
                 generator_prompt=generator_prompt,
                 distinguisher_prompt=distinguisher_prompt,
                 coder_prompt=coder_prompt,
+                gold_spec=gold_spec,
             )
             result["attempts"] = attempt + 1
             return result
@@ -178,6 +227,7 @@ def _run_with_retries(
     return {
         "task_id": task.id,
         "entry_point": task.entry_point,
+        "rescue_lane": "clarified_spec" if gold_spec is not None else "spec_guided",
         "error": errors[-1]["error"],
         "attempt_errors": errors,
         "traceback": traceback.format_exc(limit=8),
@@ -208,15 +258,38 @@ def _record(
             counters.direct_total_count += direct_total_count
             counters.spec_pass_count += spec_pass_count
             counters.spec_total_count += spec_total_count
+            clarified_payload = result.get("clarified_spec")
+            clarified_ok = (
+                bool(clarified_payload["passed_all"])
+                if isinstance(clarified_payload, dict)
+                else None
+            )
+            gold_payload = result.get("gold_spec")
+            gold_ok = (
+                bool(gold_payload["passed_all"]) if isinstance(gold_payload, dict) else None
+            )
+            rescue_ok = (
+                clarified_ok
+                if result.get("rescue_lane") == "clarified_spec"
+                else spec_ok
+            )
             if not direct_ok:
                 counters.direct_failed += 1
             if not spec_ok:
                 counters.spec_failed += 1
-            if not direct_ok and spec_ok:
+            if clarified_ok is False:
+                counters.clarified_failed += 1
+            if gold_ok is False:
+                counters.gold_failed += 1
+            if not direct_ok and rescue_ok:
                 counters.rescued += 1
-            if direct_ok and not spec_ok:
+            if not direct_ok and spec_ok:
+                counters.generated_rescued += 1
+            if not direct_ok and gold_ok:
+                counters.gold_rescued += 1
+            if direct_ok and rescue_ok is False:
                 counters.regressed += 1
-            if not direct_ok and not spec_ok:
+            if not direct_ok and rescue_ok is False:
                 counters.both_failed += 1
             if spec_pass_count > direct_pass_count:
                 counters.partial_improved += 1
@@ -254,7 +327,11 @@ def _record(
             f"[{counters.done}/{meta['task_count']}] "
             f"direct_failed={counters.direct_failed} "
             f"spec_failed={counters.spec_failed} "
+            f"clarified_failed={counters.clarified_failed} "
+            f"gold_failed={counters.gold_failed} "
             f"rescued={counters.rescued} "
+            f"generated_rescued={counters.generated_rescued} "
+            f"gold_rescued={counters.gold_rescued} "
             f"regressed={counters.regressed} "
             f"partial_delta={counters.spec_pass_count - counters.direct_pass_count} "
             f"errors={counters.errors} "
@@ -275,6 +352,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             HARD_TRAIN_DATASET,
             HARD_DEV_DATASET,
             HARD_TEST_DATASET,
+            HARDENED_DATASET,
         ],
         default=MBPP_PLUS_DATASET,
     )
@@ -290,12 +368,18 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--generator-prompt-file", type=Path, default=None)
     parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
     parser.add_argument("--coder-prompt-file", type=Path, default=None)
+    parser.add_argument(
+        "--hardened-dir",
+        type=Path,
+        default=None,
+        help="Directory of hardened task JSON files when --dataset hardened.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = _parse_args(argv)
-    tasks = _select_tasks(args)
+    tasks, gold_specs = _select_tasks(args)
     if not tasks:
         print("No tasks selected.", file=sys.stderr)
         return 1
@@ -319,6 +403,8 @@ def main(argv: list[str]) -> int:
         "max_turns": args.max_turns,
         **runtime,
         "runtime": runtime,
+        "rescue_lane": "clarified_spec" if gold_specs else "spec_guided",
+        "gold_spec_lane": bool(gold_specs),
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "generator_prompt_file": str(args.generator_prompt_file)
         if args.generator_prompt_file
@@ -349,6 +435,7 @@ def main(argv: list[str]) -> int:
                 generator_prompt=generator_prompt,
                 distinguisher_prompt=distinguisher_prompt,
                 coder_prompt=coder_prompt,
+                gold_spec=gold_specs.get(task.id),
             ): task
             for task in tasks
         }

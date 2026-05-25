@@ -1,0 +1,46 @@
+{
+  "task": {
+    "id": "hardened/004-redact-tokens",
+    "prompt": "Write a function `redact_tokens(text)` that redacts tokens from text.",
+    "entry_point": "redact_tokens",
+    "tests": [
+      {"id": "hardened/004/t0", "code": "assert redact_tokens('key sk-abc12345 ok') == 'key [REDACTED] ok'"},
+      {"id": "hardened/004/t1", "code": "assert redact_tokens('sk-short and sk-abc12345-extra') == 'sk-short and [REDACTED]'"},
+      {"id": "hardened/004/t2", "code": "assert redact_tokens('first sk-12345678 second sk-ABCDEFGH') == 'first [REDACTED] second [REDACTED]'"},
+      {"id": "hardened/004/t3", "code": "assert redact_tokens('nothing secret here') == 'nothing secret here'"},
+      {"id": "hardened/004/t4", "code": "assert redact_tokens('prefixsk-abc12345 is not separated') == 'prefixsk-abc12345 is not separated'"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Replace secret-looking API tokens in text with a fixed placeholder.",
+    "inputs": [
+      {"name": "text", "type": "str", "description": "input text that may contain API tokens", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "redacted", "type": "str", "description": "text with matching tokens replaced by [REDACTED]", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "A token starts at the beginning of the string or after whitespace.",
+      "A token starts with the literal prefix 'sk-'.",
+      "After 'sk-', a token has at least eight ASCII letters, digits, or hyphens.",
+      "Replace the whole matching token with '[REDACTED]'.",
+      "Do not redact shorter sk- strings.",
+      "Do not redact sk- substrings embedded inside a larger word."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Redact every matching token, not just the first.",
+      "Preserve all non-token text exactly."
+    ],
+    "acceptance_criteria": [
+      "Only separated sk- tokens with at least eight valid trailing characters are redacted."
+    ]
+  },
+  "known_weakness": {
+    "type": "underconstraint",
+    "source": "security string-processing hardening",
+    "description": "The raw prompt does not define token syntax, minimum length, word boundaries, or whether to redact all matches.",
+    "naive_spec_gap": "missing exact secret-token grammar"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "task": {
+    "id": "candidate/policy/002-next-invoice-action",
+    "prompt": "Write a function `next_invoice_action(invoice)` that returns the next action for an invoice.",
+    "entry_point": "next_invoice_action",
+    "tests": [
+      {"id": "candidate/policy/002/t0", "code": "assert next_invoice_action({'status': 'paid', 'balance_cents': 0, 'days_past_due': 90}) == 'none'"},
+      {"id": "candidate/policy/002/t1", "code": "assert next_invoice_action({'status': 'sent', 'balance_cents': 12000, 'fraud_hold': True, 'disputed': True, 'days_past_due': 45}) == 'hold'"},
+      {"id": "candidate/policy/002/t2", "code": "assert next_invoice_action({'status': 'overdue', 'balance_cents': 8000, 'disputed': True, 'days_past_due': 60}) == 'review'"},
+      {"id": "candidate/policy/002/t3", "code": "assert next_invoice_action({'status': 'draft', 'balance_cents': 1000, 'approved': True}) == 'review'"},
+      {"id": "candidate/policy/002/t4", "code": "assert next_invoice_action({'status': 'draft', 'balance_cents': 1000, 'approved': True, 'recipient_email': 'ap@example.com'}) == 'send'"},
+      {"id": "candidate/policy/002/t5", "code": "assert next_invoice_action({'status': 'sent', 'balance_cents': 1000, 'days_past_due': 29}) == 'remind'"},
+      {"id": "candidate/policy/002/t6", "code": "assert next_invoice_action({'status': 'sent', 'balance_cents': 1000, 'days_past_due': 30}) == 'collect'"},
+      {"id": "candidate/policy/002/t7", "code": "assert next_invoice_action({'status': 'mystery', 'balance_cents': 500}) == 'review'"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Choose the next operational action for a single invoice.",
+    "inputs": [
+      {"name": "invoice", "type": "dict", "description": "invoice state and policy flags", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "action", "type": "str", "description": "one of 'none', 'hold', 'review', 'send', 'wait', 'remind', or 'collect'", "constraints": []}
+    ],
+    "preconditions": ["invoice is a dictionary."],
+    "postconditions": [
+      "Normalize invoice['status'] to lowercase; if status is missing or unknown, return 'review'.",
+      "Treat missing balance_cents as 0. If balance_cents is less than or equal to 0, return 'none'.",
+      "If status is 'paid' or 'void', return 'none'.",
+      "For positive-balance invoices, fraud_hold or sanctions_hold set to True returns 'hold' before any dispute or collection logic.",
+      "For positive-balance invoices without a hold, disputed set to True returns 'review' before any collection logic.",
+      "For status 'draft', return 'send' only when approved is True and recipient_email is a non-empty string; otherwise return 'review'.",
+      "For status 'sent' or 'overdue', use days_past_due with missing values treated as 0: at least 30 returns 'collect', greater than 0 returns 'remind', and 0 or less returns 'wait'."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "A held invoice is not collected even when badly overdue.",
+      "A disputed invoice is reviewed instead of collected.",
+      "An approved draft without a recipient email is not ready to send."
+    ],
+    "acceptance_criteria": [
+      "The function returns one of the specified action strings.",
+      "Hold and dispute precedence is applied before overdue collection."
+    ]
+  },
+  "known_weakness": {
+    "type": "workflow_precedence",
+    "source": "accounts-receivable policy hardening",
+    "description": "The raw prompt sounds like a simple status-to-action mapping, but real behavior depends on positive balance, hold flags, dispute flags, recipient completeness, and overdue thresholds.",
+    "naive_spec_gap": "a naive implementation is likely to collect overdue invoices before checking holds or disputes, and to send approved drafts with missing recipient data"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "task": {
+    "id": "candidate/policy/003-choose-approver",
+    "prompt": "Write a function `choose_approver(request, approvers)` that selects an approver for a request.",
+    "entry_point": "choose_approver",
+    "tests": [
+      {"id": "candidate/policy/003/t0", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'sales', 'region': 'us'}\napprovers = [{'id': 'a1', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us'], 'priority': 5, 'last_assigned_at': 10}]\nassert choose_approver(request, approvers) == 'a1'"},
+      {"id": "candidate/policy/003/t1", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'sales', 'region': 'us'}\napprovers = [{'id': 'u1', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us']}, {'id': 'a2', 'active': True, 'limit_cents': 10000, 'departments': ['*'], 'regions': ['*']}]\nassert choose_approver(request, approvers) == 'a2'"},
+      {"id": "candidate/policy/003/t2", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'finance', 'region': 'eu'}\napprovers = [{'id': 'a1', 'active': True, 'limit_cents': 10000, 'departments': ['*'], 'regions': ['us']}, {'id': 'a2', 'active': True, 'limit_cents': 10000, 'departments': ['finance'], 'regions': ['*']}]\nassert choose_approver(request, approvers) == 'a2'"},
+      {"id": "candidate/policy/003/t3", "code": "request = {'requester_id': 'u1', 'amount_cents': 20000, 'department': 'engineering', 'region': 'us', 'category': 'security'}\napprovers = [{'id': 'a1', 'active': True, 'role': 'manager', 'limit_cents': 50000, 'departments': ['engineering'], 'regions': ['us']}, {'id': 'sec1', 'active': True, 'role': 'security', 'limit_cents': 50000, 'departments': ['engineering'], 'regions': ['us']}]\nassert choose_approver(request, approvers) == 'sec1'"},
+      {"id": "candidate/policy/003/t4", "code": "request = {'requester_id': 'u1', 'amount_cents': 1500000, 'department': 'finance', 'region': 'us'}\napprovers = [{'id': 'mgr1', 'active': True, 'role': 'manager', 'limit_cents': 2000000, 'departments': ['finance'], 'regions': ['us']}, {'id': 'fd1', 'active': True, 'role': 'finance_director', 'limit_cents': 2000000, 'departments': ['finance'], 'regions': ['us']}]\nassert choose_approver(request, approvers) == 'fd1'"},
+      {"id": "candidate/policy/003/t5", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'sales', 'region': 'us'}\napprovers = [{'id': 'b', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us'], 'priority': 2, 'last_assigned_at': 1}, {'id': 'a', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us'], 'priority': 1, 'last_assigned_at': 99}]\nassert choose_approver(request, approvers) == 'a'"},
+      {"id": "candidate/policy/003/t6", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'sales', 'region': 'us'}\napprovers = [{'id': 'z', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us'], 'priority': 1, 'last_assigned_at': 5}, {'id': 'a', 'active': True, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us'], 'priority': 1, 'last_assigned_at': 5}]\nassert choose_approver(request, approvers) == 'a'"},
+      {"id": "candidate/policy/003/t7", "code": "request = {'requester_id': 'u1', 'amount_cents': 5000, 'department': 'sales', 'region': 'us'}\napprovers = [{'id': 'a1', 'active': True, 'limit_cents': 1000, 'departments': ['sales'], 'regions': ['us']}, {'id': 'a2', 'active': False, 'limit_cents': 10000, 'departments': ['sales'], 'regions': ['us']}]\nassert choose_approver(request, approvers) is None"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return the id of the best eligible approver for a business request.",
+    "inputs": [
+      {"name": "request", "type": "dict", "description": "request metadata", "constraints": []},
+      {"name": "approvers", "type": "list[dict]", "description": "candidate approver records", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "approver_id", "type": "str | None", "description": "selected approver id, or None when no approver is eligible", "constraints": []}
+    ],
+    "preconditions": ["request is a dictionary and approvers is a list of dictionaries."],
+    "postconditions": [
+      "An approver is eligible only when active is exactly True and id is present.",
+      "An approver may not approve their own request; exclude approvers whose id equals request['requester_id'].",
+      "Exclude approvers whose conflict_user_ids contains the requester id; missing conflict_user_ids means no conflicts.",
+      "Treat missing limit_cents as 0. The approver limit must be greater than or equal to request['amount_cents'], with missing request amount treated as 0.",
+      "The request department must appear in approver['departments'] or the departments list must contain '*'. Missing departments matches nothing.",
+      "The request region must appear in approver['regions'] or the regions list must contain '*'. Missing regions matches nothing.",
+      "If request['category'] is 'security', the approver role must be 'security' or 'compliance'.",
+      "If request amount is at least 1000000 cents, the approver role must be 'finance_director'.",
+      "Among eligible approvers, choose the one with the lowest priority value, treating missing priority as 100.",
+      "Break priority ties by lowest last_assigned_at, treating missing last_assigned_at as 0.",
+      "Break any remaining tie by lexicographically smallest approver id.",
+      "Return None if no approver is eligible."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Wildcard departments and regions match any request value.",
+      "Security requests require security/compliance role even when a manager has enough approval limit.",
+      "High-value requests require finance_director role even when another approver has enough approval limit."
+    ],
+    "acceptance_criteria": [
+      "Selection is deterministic for every input order.",
+      "The function returns only an eligible approver id or None."
+    ]
+  },
+  "known_weakness": {
+    "type": "tie_breaking_and_eligibility",
+    "source": "approval-routing policy hardening",
+    "description": "The raw prompt makes it easy to choose the first approver with enough limit, missing conflict checks, wildcard matching, special-category role constraints, and deterministic tie-breaking.",
+    "naive_spec_gap": "models often implement partial eligibility and unstable first-match selection instead of full policy filtering followed by explicit tie-breaking"
+  }
+}

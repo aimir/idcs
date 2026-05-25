@@ -1,0 +1,53 @@
+{
+  "task": {
+    "id": "candidate/policy/001-can-view-document",
+    "prompt": "Write a function `can_view_document(user, document)` that decides whether a user can view a document.",
+    "entry_point": "can_view_document",
+    "tests": [
+      {"id": "candidate/policy/001/t0", "code": "assert can_view_document({'id': 'u1', 'active': True, 'role': 'employee', 'department': 'sales'}, {'owner_id': 'u1', 'status': 'active'}) is True"},
+      {"id": "candidate/policy/001/t1", "code": "assert can_view_document({'id': 'admin1', 'active': False, 'role': 'admin', 'department': 'legal'}, {'owner_id': 'u2', 'status': 'active', 'shared_with': ['admin1']}) is False"},
+      {"id": "candidate/policy/001/t2", "code": "assert can_view_document({'id': 'admin1', 'active': True, 'role': 'admin', 'department': 'legal'}, {'owner_id': 'u2', 'status': 'deleted', 'classification': 'public'}) is False"},
+      {"id": "candidate/policy/001/t3", "code": "assert can_view_document({'id': 'u1', 'active': True, 'role': 'admin', 'department': 'engineering'}, {'owner_id': 'u1', 'status': 'active', 'legal_hold': True, 'shared_with': ['u1']}) is False"},
+      {"id": "candidate/policy/001/t4", "code": "assert can_view_document({'id': 'c1', 'active': True, 'role': 'compliance', 'department': 'legal'}, {'owner_id': 'u2', 'status': 'active', 'legal_hold': True}) is True"},
+      {"id": "candidate/policy/001/t5", "code": "assert can_view_document({'id': 'admin1', 'active': True, 'role': 'admin', 'department': 'sales'}, {'owner_id': 'u2', 'status': 'active', 'classification': 'restricted', 'allowed_departments': ['finance']}) is False"},
+      {"id": "candidate/policy/001/t6", "code": "assert can_view_document({'id': 'u3', 'active': True, 'role': 'employee', 'department': 'finance'}, {'owner_id': 'u2', 'status': 'active', 'classification': 'restricted', 'shared_with': ['u3'], 'allowed_departments': ['finance']}) is True"},
+      {"id": "candidate/policy/001/t7", "code": "assert can_view_document({}, {'owner_id': 'u1', 'status': 'active'}) is False"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Authorize document viewing from user and document policy dictionaries.",
+    "inputs": [
+      {"name": "user", "type": "dict", "description": "viewer attributes", "constraints": []},
+      {"name": "document", "type": "dict", "description": "document attributes and sharing policy", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "allowed", "type": "bool", "description": "whether the user may view the document", "constraints": []}
+    ],
+    "preconditions": ["Inputs are dictionaries. Missing optional fields are handled as defaults."],
+    "postconditions": [
+      "Return False unless the user has a non-empty id and user['active'] is exactly True.",
+      "Treat missing document status as 'active'. If status is 'deleted', return False for everyone.",
+      "If document['legal_hold'] is True, allow only users with role 'compliance' and department 'legal'; this overrides owner, admin, shared_with, and department access.",
+      "For non-legal-hold documents, a base relationship exists if the user owns the document, has role 'admin', appears in document['shared_with'], or the user's department appears in document['allowed_departments'].",
+      "Treat missing shared_with and allowed_departments as empty lists.",
+      "For classification 'restricted', require both a base relationship and the user's department to appear in allowed_departments.",
+      "For all other classifications, allow any base relationship."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Inactive users are denied even if they are admins or owners.",
+      "Deleted documents are denied even to admins.",
+      "Restricted documents do not grant access to an admin from the wrong department unless that department is explicitly allowed."
+    ],
+    "acceptance_criteria": [
+      "The function returns a boolean.",
+      "Deny and legal-hold rules take precedence over allow rules."
+    ]
+  },
+  "known_weakness": {
+    "type": "policy_precedence",
+    "source": "authorization hardening",
+    "description": "The raw prompt invites a simple owner/admin/shared check and hides the deny-first rules for inactive users, deleted documents, legal holds, and restricted classifications.",
+    "naive_spec_gap": "admin or owner access is likely to be treated as absolute instead of being overridden by compliance and deny-by-default policy"
+  }
+}

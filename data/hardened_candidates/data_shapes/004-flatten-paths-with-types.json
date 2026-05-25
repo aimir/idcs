@@ -1,0 +1,58 @@
+{
+  "task": {
+    "id": "candidate/data_shapes/004-flatten-paths-with-types",
+    "prompt": "Write a function `flatten_paths(data)` that flattens nested data into paths.",
+    "entry_point": "flatten_paths",
+    "tests": [
+      {"id": "candidate/data_shapes/004/t0", "code": "assert flatten_paths({'a': [10, {'b': 20}]}) == [(('a', 0), 10), (('a', 1, 'b'), 20)]"},
+      {"id": "candidate/data_shapes/004/t1", "code": "result = flatten_paths({'x': (1, [2, 3])})\nassert result == [(('x', ('tuple', 0)), 1), (('x', ('tuple', 1), 0), 2), (('x', ('tuple', 1), 1), 3)]"},
+      {"id": "candidate/data_shapes/004/t2", "code": "assert flatten_paths({'empty_list': [], 'empty_tuple': (), 'empty_dict': {}}) == [(('empty_list',), []), (('empty_tuple',), ()), (('empty_dict',), {})]"},
+      {"id": "candidate/data_shapes/004/t3", "code": "assert flatten_paths([{'a': True}, {'a': False}]) == [((0, 'a'), True), ((1, 'a'), False)]"},
+      {"id": "candidate/data_shapes/004/t4", "code": "data = {'b': 2, 'a': {'z': 1, 'y': 0}}\nassert flatten_paths(data) == [(('b',), 2), (('a', 'z'), 1), (('a', 'y'), 0)]"},
+      {"id": "candidate/data_shapes/004/t5", "code": "assert flatten_paths({'0': ['zero'], 0: ('int-key',)}) == [(('0', 0), 'zero'), ((0, ('tuple', 0)), 'int-key')]"},
+      {"id": "candidate/data_shapes/004/t6", "code": "data = {'a': [{'b': 1}]}\noriginal = {'a': [{'b': 1}]}\nout = flatten_paths(data)\nassert data == original\nassert out == [(('a', 0, 'b'), 1)]"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return leaf values from nested dict/list/tuple data together with unambiguous tuple paths.",
+    "inputs": [
+      {"name": "data", "type": "object", "description": "a scalar, dict, list, or tuple containing nested supported values", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "items", "type": "list[tuple[tuple[object, ...], object]]", "description": "ordered (path, leaf_value) pairs", "constraints": []}
+    ],
+    "preconditions": [
+      "Containers are ordinary dict, list, and tuple instances."
+    ],
+    "postconditions": [
+      "Traverse dictionaries in insertion order using each key itself as the next path component.",
+      "Traverse lists in index order using the integer index as the next path component.",
+      "Traverse tuples in index order using ('tuple', index) as the next path component.",
+      "A non-empty dict, list, or tuple is not a leaf; recurse into it.",
+      "An empty dict, empty list, or empty tuple is a leaf and appears with its own path and original empty container value.",
+      "Top-level scalar input returns one item with an empty tuple path.",
+      "Return paths as tuples, not strings or lists.",
+      "Do not sort dictionary keys.",
+      "Do not mutate the input."
+    ],
+    "invariants": [
+      "Every returned path is a tuple.",
+      "List indexes and tuple indexes are distinguishable in returned paths."
+    ],
+    "edge_cases": [
+      "String key '0' and integer list index 0 are different path components.",
+      "Tuple index markers avoid confusing a tuple position with a list position.",
+      "False and zero leaf values are still leaves and must be included."
+    ],
+    "acceptance_criteria": [
+      "The flattened output preserves traversal order and container-origin information.",
+      "No path is represented as a dotted string."
+    ]
+  },
+  "known_weakness": {
+    "type": "path_representation",
+    "source": "manual data-shape hardening",
+    "description": "The raw prompt invites dotted-string paths, sorted keys, tuple/list collapse, and dropping empty containers or falsey leaves.",
+    "naive_spec_gap": "missing path encoding, traversal order, tuple-versus-list distinction, and empty-container leaf semantics"
+  }
+}

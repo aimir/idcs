@@ -1,0 +1,55 @@
+{
+  "task": {
+    "id": "candidate/security/004-path-policy-precedence",
+    "prompt": "Write a function `is_path_allowed(path, allowlist, denylist)` that checks whether a request path is allowed.",
+    "entry_point": "is_path_allowed",
+    "tests": [
+      {"id": "candidate/security/004/t0", "code": "assert is_path_allowed('/admin/panel', ['/admin/*'], []) is True"},
+      {"id": "candidate/security/004/t1", "code": "assert is_path_allowed('/admin/secrets', ['/admin/*'], ['/admin/secrets']) is False"},
+      {"id": "candidate/security/004/t2", "code": "assert is_path_allowed('/administer', ['/admin/*'], []) is False"},
+      {"id": "candidate/security/004/t3", "code": "assert is_path_allowed('/public/file', [], []) is False"},
+      {"id": "candidate/security/004/t4", "code": "assert is_path_allowed('/reports/2024', ['/reports'], []) is False"},
+      {"id": "candidate/security/004/t5", "code": "assert is_path_allowed('/docs//./readme', ['/docs/*'], []) is True"},
+      {"id": "candidate/security/004/t6", "code": "assert is_path_allowed('/public/%2e%2e/admin', ['/public/*', '/admin/*'], []) is False"},
+      {"id": "candidate/security/004/t7", "code": "assert is_path_allowed('/admin/health', ['/admin/health'], ['/admin/*']) is False"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Evaluate path allow and deny rules after canonicalizing the request path, with deny rules taking precedence.",
+    "inputs": [
+      {"name": "path", "type": "str", "description": "request path to authorize", "constraints": []},
+      {"name": "allowlist", "type": "list[str]", "description": "allowed exact paths or wildcard path prefixes", "constraints": []},
+      {"name": "denylist", "type": "list[str]", "description": "denied exact paths or wildcard path prefixes", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "allowed", "type": "bool", "description": "True only when the path is explicitly allowed and not denied", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Percent-decode the request path exactly once before authorization checks.",
+      "Reject the request path with False if it is not a string, does not start with exactly one slash, starts with two slashes, contains a URL scheme, contains a NUL character, or contains any decoded dot-dot segment.",
+      "Canonicalize the request path by splitting on slashes, removing empty segments and single-dot segments, and joining with one leading slash.",
+      "Canonicalize rules with the same slash and single-dot normalization, but treat invalid rules as matching nothing.",
+      "A rule without a trailing /* is an exact canonical path match.",
+      "A rule ending in /* is a strict subtree match: /admin/* matches /admin/panel and /admin/panel/logs, but not /admin or /administer.",
+      "Return False when no allowlist rule matches.",
+      "Return False when any denylist rule matches, even if a more specific allowlist rule also matches.",
+      "Return True only when at least one allowlist rule matches and no denylist rule matches."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Deny rules override allow rules regardless of specificity.",
+      "Wildcard matching must respect path segment boundaries.",
+      "Encoded traversal is rejected before any allow rule can rescue the path."
+    ],
+    "acceptance_criteria": [
+      "Authorization must be fail-closed: ambiguous, invalid, unallowed, or denied paths return False."
+    ]
+  },
+  "known_weakness": {
+    "type": "security_policy_precedence",
+    "source": "allowlist-denylist path authorization hardening",
+    "description": "The raw prompt leaves rule precedence, wildcard boundaries, canonicalization, traversal, and default-deny behavior unspecified.",
+    "naive_spec_gap": "missing deny-overrides-allow and canonicalize-before-match policy"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "task": {
+    "id": "hardened/003-apply-coupon",
+    "prompt": "Write a function `apply_coupon(subtotal_cents, coupon)` that applies a coupon to a cart total.",
+    "entry_point": "apply_coupon",
+    "tests": [
+      {"id": "hardened/003/t0", "code": "assert apply_coupon(999, {'type': 'percent', 'value': 10}) == 900"},
+      {"id": "hardened/003/t1", "code": "assert apply_coupon(1000, {'type': 'percent', 'value': 50, 'max_discount_cents': 200}) == 800"},
+      {"id": "hardened/003/t2", "code": "assert apply_coupon(500, {'type': 'fixed', 'value': 750}) == 0"},
+      {"id": "hardened/003/t3", "code": "assert apply_coupon(499, {'type': 'fixed', 'value': 100, 'min_subtotal_cents': 500}) == 499"},
+      {"id": "hardened/003/t4", "code": "assert apply_coupon(1000, {'type': 'bogus', 'value': 100}) == 1000"},
+      {"id": "hardened/003/t5", "code": "assert apply_coupon(1000, {}) == 1000"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Apply a percent or fixed coupon to an integer subtotal in cents.",
+    "inputs": [
+      {"name": "subtotal_cents", "type": "int", "description": "cart subtotal before discount, in cents", "constraints": ["non-negative"]},
+      {"name": "coupon", "type": "dict", "description": "coupon settings", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "total_cents", "type": "int", "description": "cart total after discount, in cents", "constraints": ["non-negative"]}
+    ],
+    "preconditions": ["subtotal_cents is a non-negative integer."],
+    "postconditions": [
+      "If coupon is missing type or value, return subtotal_cents unchanged.",
+      "If coupon['min_subtotal_cents'] exists and subtotal_cents is below it, return subtotal_cents unchanged.",
+      "For type 'percent', discount is floor(subtotal_cents * value / 100).",
+      "For type 'fixed', discount is coupon['value'] cents.",
+      "If max_discount_cents exists, cap the discount to that many cents.",
+      "Unknown coupon types produce no discount.",
+      "Never return less than zero."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Percent discounts round down to whole cents.",
+      "A fixed discount larger than the subtotal returns zero.",
+      "Invalid or unsupported coupons leave the subtotal unchanged."
+    ],
+    "acceptance_criteria": [
+      "Return an integer number of cents for every supported input."
+    ]
+  },
+  "known_weakness": {
+    "type": "ambiguity",
+    "source": "commerce policy hardening",
+    "description": "The raw prompt leaves rounding, caps, minimum subtotal, invalid coupons, and floor-at-zero behavior unspecified.",
+    "naive_spec_gap": "missing money rounding and coupon-policy precedence"
+  }
+}

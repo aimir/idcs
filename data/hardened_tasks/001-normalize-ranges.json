@@ -1,0 +1,48 @@
+{
+  "task": {
+    "id": "hardened/001-normalize-ranges",
+    "prompt": "Write a function `normalize_ranges(ranges)` that normalizes a list of integer ranges.",
+    "entry_point": "normalize_ranges",
+    "tests": [
+      {"id": "hardened/001/t0", "code": "assert normalize_ranges([(5, 3), (1, 2), (2, 4), (10, 10), (9, 8)]) == [(1, 5), (8, 10)]"},
+      {"id": "hardened/001/t1", "code": "assert normalize_ranges([]) == []"},
+      {"id": "hardened/001/t2", "code": "assert normalize_ranges([(4, 4), (2, 1), (-1, 0)]) == [(-1, 2), (4, 4)]"},
+      {"id": "hardened/001/t3", "code": "assert normalize_ranges([(1, 1), (3, 3)]) == [(1, 1), (3, 3)]"},
+      {"id": "hardened/001/t4", "code": "items = [(3, 1), (7, 7)]\nout = normalize_ranges(items)\nassert items == [(3, 1), (7, 7)]\nassert out == [(1, 3), (7, 7)]"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Normalize closed integer ranges into sorted, non-overlapping ranges.",
+    "inputs": [
+      {"name": "ranges", "type": "list[tuple[int, int]]", "description": "closed integer ranges; each pair may be written in either order", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result", "type": "list[tuple[int, int]]", "description": "normalized closed ranges sorted by start", "constraints": []}
+    ],
+    "preconditions": ["Each input range contains exactly two integers."],
+    "postconditions": [
+      "Treat every input pair as a closed range from min(start, end) through max(start, end).",
+      "Sort ranges by their normalized start.",
+      "Merge ranges that overlap or touch, so (1, 2) and (3, 4) become (1, 4).",
+      "Return tuples, not lists.",
+      "Do not mutate the input list."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Empty input returns an empty list.",
+      "A reversed range such as (5, 3) is normalized to (3, 5).",
+      "Singleton ranges such as (4, 4) are valid closed ranges."
+    ],
+    "acceptance_criteria": [
+      "The output is sorted by start.",
+      "No two output ranges overlap or touch.",
+      "The output covers exactly the same integer points as the normalized input ranges."
+    ]
+  },
+  "known_weakness": {
+    "type": "implicit_assumption",
+    "source": "interval-normalization variant",
+    "description": "The raw prompt does not say whether ranges are closed, whether reversed endpoints are valid, or whether touching ranges should merge.",
+    "naive_spec_gap": "missing closed-interval, reversed-endpoint, adjacency, and non-mutation semantics"
+  }
+}

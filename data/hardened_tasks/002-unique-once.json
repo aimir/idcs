@@ -1,0 +1,45 @@
+{
+  "task": {
+    "id": "hardened/002-unique-once",
+    "prompt": "Write a function `unique_values(values)` that returns the unique values from a list.",
+    "entry_point": "unique_values",
+    "tests": [
+      {"id": "hardened/002/t0", "code": "assert unique_values([3, 1, 3, 2, 4, 2, 5]) == [1, 4, 5]"},
+      {"id": "hardened/002/t1", "code": "assert unique_values(['A', 'a', 'A', 'b']) == ['a', 'b']"},
+      {"id": "hardened/002/t2", "code": "assert unique_values([1, 1, 1]) == []"},
+      {"id": "hardened/002/t3", "code": "assert unique_values([]) == []"},
+      {"id": "hardened/002/t4", "code": "items = ['x', 'y', 'x', 'z']\nout = unique_values(items)\nassert items == ['x', 'y', 'x', 'z']\nassert out == ['y', 'z']"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return values that occur exactly once in the input list.",
+    "inputs": [
+      {"name": "values", "type": "list[object]", "description": "list of hashable values", "constraints": ["values are hashable"]}
+    ],
+    "outputs": [
+      {"name": "result", "type": "list[object]", "description": "input values whose total occurrence count is exactly one", "constraints": []}
+    ],
+    "preconditions": ["Every value is hashable."],
+    "postconditions": [
+      "Include a value only if it appears exactly once in the whole input list.",
+      "Preserve the original input order among the included values.",
+      "Use normal Python equality, so string comparison is case-sensitive.",
+      "Do not mutate the input list."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Repeated values are excluded entirely.",
+      "Empty input returns an empty list.",
+      "If all values repeat, return an empty list."
+    ],
+    "acceptance_criteria": [
+      "This is not ordinary de-duplication; values that appear more than once must not appear in the output."
+    ]
+  },
+  "known_weakness": {
+    "type": "underconstraint",
+    "source": "Mbpp/572-style uniqueness ambiguity",
+    "description": "The phrase 'unique values' often causes models to de-duplicate first occurrences instead of filtering to values with count exactly one.",
+    "naive_spec_gap": "missing distinction between distinct values and values whose occurrence count is one"
+  }
+}

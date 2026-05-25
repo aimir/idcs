@@ -1,0 +1,54 @@
+{
+  "task": {
+    "id": "candidate/parsing/002-price-rules",
+    "prompt": "Write a function `price_after_rules(amount_cents, rules)` that applies price adjustment rules to an amount.",
+    "entry_point": "price_after_rules",
+    "tests": [
+      {"id": "candidate/parsing/002/t0", "code": "assert price_after_rules(999, '10% off') == 900"},
+      {"id": "candidate/parsing/002/t1", "code": "assert price_after_rules(1000, '$1.00 fee, 10% off, tax 10%') == 1100"},
+      {"id": "candidate/parsing/002/t2", "code": "assert price_after_rules(300, '$5.00 off, $1.00 fee') == 100"},
+      {"id": "candidate/parsing/002/t3", "code": "assert price_after_rules(200, 'tax 8.25%') == 217"},
+      {"id": "candidate/parsing/002/t4", "code": "assert price_after_rules(1000, '10% OFF, $0.25 fee') == 1025"},
+      {"id": "candidate/parsing/002/t5", "code": "assert price_after_rules(1000, '12.5% off') == 875"},
+      {"id": "candidate/parsing/002/t6", "code": "assert price_after_rules(333, '10% off, 10% off') == 270"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Apply a comma-separated rule string to an integer price in cents with exact money rounding.",
+    "inputs": [
+      {"name": "amount_cents", "type": "int", "description": "starting amount in cents", "constraints": ["non-negative"]},
+      {"name": "rules", "type": "str", "description": "comma-separated price rules", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "result_cents", "type": "int", "description": "final amount in cents", "constraints": ["non-negative"]}
+    ],
+    "preconditions": ["amount_cents is a non-negative integer."],
+    "postconditions": [
+      "Split rules on commas and trim ASCII whitespace around each chunk.",
+      "Supported chunks are exactly lowercase 'N% off', '$D.CC off', '$D.CC fee', and 'tax N%'.",
+      "N may be an integer or decimal percent with at most two digits after the decimal point.",
+      "Ignore malformed chunks and case-mismatched keywords.",
+      "Apply all off rules first in their original order, then all fee rules, then all tax rules.",
+      "For percent off, subtract floor(current_cents * percent / 100).",
+      "For fixed off, subtract the parsed cents amount.",
+      "Clamp the running amount to zero after every off rule.",
+      "For fee, add the parsed cents amount.",
+      "For tax, add tax rounded half up to the nearest cent."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Repeated percent discounts are sequential, not combined.",
+      "Tax is applied after discounts and fees even if its text appears earlier.",
+      "A fixed discount larger than the current amount clamps to zero before fees."
+    ],
+    "acceptance_criteria": [
+      "The function returns an integer cent amount using only integer arithmetic."
+    ]
+  },
+  "known_weakness": {
+    "type": "rounding_precedence",
+    "source": "manual money hardening",
+    "description": "The raw prompt hides exact rule grammar, case sensitivity, discount ordering, tax ordering, clamping, and floor versus half-up rounding.",
+    "naive_spec_gap": "missing integer rounding and adjustment precedence semantics"
+  }
+}
