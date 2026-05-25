@@ -1,6 +1,6 @@
 # Adversarial Iteration for Underspecified Program Synthesis
 
-**Authors:** Uri Ariel Chen; Nitzan Pomerantz; Amir Sarid; Amit Saroussi (all Independent Researchers)
+**Authors:** Uri Ariel Chen; Nitzan Pomerantz; Amir Sarid; Amit Saroussi
 **With:** Apart Research
 
 ## Abstract

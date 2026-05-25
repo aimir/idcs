@@ -92,4 +92,4 @@ mypy src/idcs scripts
 
 ## Authors
 
-Uri Ariel Chen · Nitzan Pomerantz · Amir Sarid · Amit Saroussi — all independent researchers, with [Apart Research](https://apartresearch.com).
+Uri Ariel Chen · Nitzan Pomerantz · Amir Sarid · Amit Saroussi, with [Apart Research](https://apartresearch.com).
