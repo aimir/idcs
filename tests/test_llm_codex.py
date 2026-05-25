@@ -113,11 +113,15 @@ def test_codex_complete_typed_parses_json_response(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
 
-    result = LLM().complete_typed("system", "give me json", Answer)
+    llm = LLM()
+    result = llm.complete_typed("system", "give me json", Answer)
 
     assert result == Answer(value=7)
     assert "Respond with a single JSON object" in prompts[0]
     assert '"value"' in prompts[0]
+    # codex has no structured-output API, so every typed call is recorded
+    # as a fallback for telemetry parity with the openai-compatible path.
+    assert llm.structured_fallback_count == 1
 
 
 def test_codex_failure_omits_captured_output(
@@ -145,6 +149,7 @@ def test_codex_failure_omits_captured_output(
     monkeypatch.setenv("IDCS_BACKEND", "codex")
     monkeypatch.setenv("OPENROUTER_API_KEY", secret)
     monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+    monkeypatch.setattr("idcs.llm.time.sleep", lambda _s: None)
 
     with pytest.raises(RuntimeError) as exc_info:
         LLM().complete("system", "user")
@@ -152,6 +157,55 @@ def test_codex_failure_omits_captured_output(
     message = str(exc_info.value)
     assert secret not in message
     assert "output omitted" in message
+
+
+def test_codex_missing_binary_does_not_consume_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("codex not installed")
+
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+
+    llm = LLM()
+    with pytest.raises(RuntimeError, match="codex.*not found"):
+        llm.complete("system", "user")
+    # Binary missing: no API call happened, budget must be untouched.
+    assert llm.calls_made == 0
+
+
+def test_codex_retries_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        input: str,
+        text: bool,
+        capture_output: bool,
+        timeout: float,
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        del input, text, capture_output, timeout, check
+        attempts.append(1)
+        if len(attempts) < 3:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="transient")
+        output_path = Path(command[command.index("--output-last-message") + 1])
+        output_path.write_text("recovered", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("IDCS_BACKEND", "codex")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr("idcs.llm.subprocess.run", fake_run)
+    monkeypatch.setattr("idcs.llm.time.sleep", lambda _s: None)
+
+    llm = LLM()
+    assert llm.complete("system", "user") == "recovered"
+    assert len(attempts) == 3
+    # Two failed attempts + one successful attempt all count against budget.
+    assert llm.calls_made == 3
 
 
 def test_codex_backend_respects_call_budget(monkeypatch: pytest.MonkeyPatch) -> None:

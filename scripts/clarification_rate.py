@@ -25,9 +25,10 @@ Usage:
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
+import argparse
+import logging
 import sys
+import time
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -36,10 +37,6 @@ if str(_SCRIPT_DIR) in sys.path:
 _SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-import argparse
-import logging
-import time
 
 from idcs.benchmark.scoring import score  # noqa: E402
 from idcs.coder import Coder  # noqa: E402

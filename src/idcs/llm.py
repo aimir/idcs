@@ -229,13 +229,17 @@ class LLM:
             f"response.\n\n"
             f"Schema:\n```json\n{schema_text}\n```"
         )
+        if self.backend == CODEX_BACKEND:
+            # Codex has no structured-output API; we always parse JSON from
+            # text. Record it so telemetry reflects that every codex typed
+            # call is on the fallback path.
+            self._record_structured_fallback(output_type.__name__, "codex_backend")
+            raw = self.complete(system, augmented_user, max_tokens=max_tokens)
+            return _parse_json_response(raw, output_type)
+
         fallback_reason: str | None = None
         calls_before_parse = self.calls_made
         try:
-            if self.backend == CODEX_BACKEND:
-                raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-                return _parse_json_response(raw, output_type)
-
             if self.client is None:
                 raise RuntimeError("OpenAI-compatible backend was not initialized.")
             client = self.client
@@ -274,6 +278,10 @@ class LLM:
         )
 
     def _complete_with_codex(self, system: str, user: str, *, max_tokens: int) -> str:
+        # max_tokens is advisory only: the codex CLI does not expose a hard
+        # cap, so it gets passed to the model as prose. Long-running prompts
+        # can exceed the budget — callers that need a strict ceiling should
+        # use the openai-compatible backend.
         prompt = (
             "You are serving as a stateless completion backend for a benchmark runner.\n"
             "Do not edit files, run shell commands, or inspect the repository.\n"
@@ -282,8 +290,48 @@ class LLM:
             f"USER:\n{user}\n\n"
             f"Keep the response within roughly {max_tokens} tokens."
         )
+        last_error: Exception | None = None
+        for attempt in range(MAX_RETRIES + 1):
+            self._check_budget()
+            try:
+                result = self._codex_subprocess_once(prompt)
+                self.calls_made += 1
+                return result
+            except FileNotFoundError as exc:
+                # Binary missing is not a transient failure and no API call
+                # was made — do not retry and do not bill the budget.
+                raise RuntimeError(
+                    "Codex backend requested but the `codex` executable was not found."
+                ) from exc
+            except subprocess.TimeoutExpired as exc:
+                self.calls_made += 1
+                last_error = RuntimeError(
+                    f"Codex backend timed out after {self.codex_timeout_s:g} seconds."
+                )
+                last_error.__cause__ = exc
+            except RuntimeError as exc:
+                self.calls_made += 1
+                last_error = exc
+            if attempt == MAX_RETRIES:
+                assert last_error is not None
+                raise last_error
+            delay = (2**attempt) + random.uniform(0, 1)
+            log.warning(
+                "Codex backend error, retry %d/%d in %.1fs",
+                attempt + 1, MAX_RETRIES, delay,
+            )
+            time.sleep(delay)
+        raise AssertionError("unreachable")
+
+    def _codex_subprocess_once(self, prompt: str) -> str:
         with TemporaryDirectory(prefix="idcs-codex-") as temp_dir:
             output_path = Path(temp_dir) / "last-message.txt"
+            # ``-C`` puts the codex process's working directory at the
+            # current repo root. With ``--sandbox read-only`` the process
+            # cannot write, but it can still read repo contents (including
+            # any ``.env`` / secrets) and could exfiltrate via its own API
+            # calls. Acceptable for a benchmark backend run on a trusted
+            # checkout; revisit if codex grows reach beyond CWD.
             command = [
                 os.environ.get("IDCS_CODEX_EXECUTABLE", "codex"),
                 "exec",
@@ -301,35 +349,20 @@ class LLM:
                 str(output_path),
                 "-",
             ]
-            self._check_budget()
-            try:
-                completed = subprocess.run(
-                    command,
-                    input=prompt,
-                    text=True,
-                    capture_output=True,
-                    timeout=self.codex_timeout_s,
-                    check=False,
-                )
-            except FileNotFoundError as exc:
-                self.calls_made += 1
-                raise RuntimeError(
-                    "Codex backend requested but the `codex` executable was not found."
-                ) from exc
-            except subprocess.TimeoutExpired as exc:
-                self.calls_made += 1
-                raise RuntimeError(
-                    f"Codex backend timed out after {self.codex_timeout_s:g} seconds."
-                ) from exc
-            self.calls_made += 1
-
+            completed = subprocess.run(
+                command,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                timeout=self.codex_timeout_s,
+                check=False,
+            )
             if completed.returncode != 0:
                 raise RuntimeError(
                     "Codex backend failed with exit code "
                     f"{completed.returncode}; output omitted to avoid leaking prompts "
                     "or credentials."
                 )
-
             if output_path.exists():
                 output = output_path.read_text(encoding="utf-8").strip()
                 if output:

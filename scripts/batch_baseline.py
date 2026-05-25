@@ -15,10 +15,18 @@ Example:
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
+import argparse
+import json
+import random
 import sys
+import time
+import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+from threading import Lock
+from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) in sys.path:
@@ -26,17 +34,6 @@ if str(_SCRIPT_DIR) in sys.path:
 _SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-import argparse
-import json
-import random
-import time
-import traceback
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
-from datetime import datetime
-from threading import Lock
-from typing import Any
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
 from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402

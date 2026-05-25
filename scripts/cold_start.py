@@ -11,8 +11,7 @@ Usage:
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
+import json
 import sys
 from pathlib import Path
 
@@ -23,8 +22,6 @@ if str(_SCRIPT_DIR) in sys.path:
 _SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-import json
 
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402

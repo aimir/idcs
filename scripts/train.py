@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-# ruff: noqa: E402, I001
-
+import argparse
+import logging
+import os
+import random
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -13,12 +16,6 @@ if str(_SCRIPT_DIR) in sys.path:
 _SRC = _SCRIPT_DIR.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-import argparse
-import logging
-import os
-import random
-from collections.abc import Callable
 
 from idcs._prompts import load_prompt  # noqa: E402
 from idcs.benchmark.tasks import load_mbpp_plus  # noqa: E402
