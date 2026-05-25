@@ -1,0 +1,51 @@
+{
+  "task": {
+    "id": "candidate/parsing/001-censor-terms",
+    "prompt": "Write a function `censor_terms(text, terms)` that censors banned terms in text.",
+    "entry_point": "censor_terms",
+    "tests": [
+      {"id": "candidate/parsing/001/t0", "code": "assert censor_terms('The cat sat.', ['cat']) == 'The *** sat.'"},
+      {"id": "candidate/parsing/001/t1", "code": "assert censor_terms('concatenate cat scat', ['cat']) == 'concatenate *** scat'"},
+      {"id": "candidate/parsing/001/t2", "code": "assert censor_terms('C.A.T. cat', ['c.a.t.', 'cat']) == '****** ***'"},
+      {"id": "candidate/parsing/001/t3", "code": "assert censor_terms('cat-cat cat_cat', ['cat']) == '***-*** cat_cat'"},
+      {"id": "candidate/parsing/001/t4", "code": "assert censor_terms('pay paid payment', ['pay', 'paid']) == '*** **** payment'"},
+      {"id": "candidate/parsing/001/t5", "code": "assert censor_terms('new york new', ['new', 'new york']) == '******** ***'"},
+      {"id": "candidate/parsing/001/t6", "code": "assert censor_terms('Nothing to hide', []) == 'Nothing to hide'"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Replace each banned term occurrence with asterisks while respecting literal term boundaries.",
+    "inputs": [
+      {"name": "text", "type": "str", "description": "text that may contain banned terms", "constraints": []},
+      {"name": "terms", "type": "list[str]", "description": "literal banned terms", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "censored", "type": "str", "description": "text with matching banned terms replaced by asterisks", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Match terms case-insensitively but preserve all non-matching text exactly.",
+      "Treat every term as literal text, not as a regular expression pattern.",
+      "A match is valid only when the character before the match, if any, is not an ASCII letter, digit, or underscore.",
+      "A match is valid only when the character after the match, if any, is not an ASCII letter, digit, or underscore.",
+      "Hyphen and punctuation are boundaries; underscore is not a boundary.",
+      "If multiple terms could match at the same position, use the longest term.",
+      "Replace each matched character with one asterisk, preserving the original matched length."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Do not censor a term inside a larger alphanumeric or underscore word.",
+      "Terms may contain spaces or punctuation.",
+      "An empty terms list returns the original text unchanged."
+    ],
+    "acceptance_criteria": [
+      "All and only boundary-valid literal term occurrences are replaced with same-length asterisk runs."
+    ]
+  },
+  "known_weakness": {
+    "type": "token_boundary",
+    "source": "manual parsing hardening",
+    "description": "The raw prompt invites naive substring replacement and misses literal matching, longest-match, case-insensitivity, and ASCII boundary rules.",
+    "naive_spec_gap": "missing substring boundary, regex escaping, underscore, and overlap semantics"
+  }
+}

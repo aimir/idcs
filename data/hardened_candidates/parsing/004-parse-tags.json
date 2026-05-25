@@ -1,0 +1,51 @@
+{
+  "task": {
+    "id": "candidate/parsing/004-parse-tags",
+    "prompt": "Write a function `parse_tags(text)` that parses a comma-separated tag string.",
+    "entry_point": "parse_tags",
+    "tests": [
+      {"id": "candidate/parsing/004/t0", "code": "assert parse_tags('alpha,beta,gamma') == ['alpha', 'beta', 'gamma']"},
+      {"id": "candidate/parsing/004/t1", "code": "assert parse_tags(' alpha , , beta ') == ['alpha', 'beta']"},
+      {"id": "candidate/parsing/004/t2", "code": "assert parse_tags(r'alpha\\,beta,gamma') == ['alpha,beta', 'gamma']"},
+      {"id": "candidate/parsing/004/t3", "code": "assert parse_tags(r'a\\\\,b') == ['a\\\\', 'b']"},
+      {"id": "candidate/parsing/004/t4", "code": "assert parse_tags(r'one\\\\two,three') == ['one\\\\two', 'three']"},
+      {"id": "candidate/parsing/004/t5", "code": "assert parse_tags(r'bad\\q,ok') == [r'bad\\q', 'ok']"},
+      {"id": "candidate/parsing/004/t6", "code": "assert parse_tags(r'trailing\\,') == ['trailing,']"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Parse comma-separated tags while honoring backslash-escaped commas and backslashes.",
+    "inputs": [
+      {"name": "text", "type": "str", "description": "tag list text", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "tags", "type": "list[str]", "description": "parsed tags in original order", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Scan the input left to right.",
+      "A comma is a separator only when it is preceded by an even number of consecutive backslashes, including zero.",
+      "A comma preceded by an odd number of consecutive backslashes is data and the escaping backslash is removed.",
+      "After splitting, strip leading and trailing ASCII whitespace from each raw field.",
+      "Ignore fields that become empty after stripping.",
+      "Within each kept field, unescape '\\\\' to a single backslash and '\\,' to a comma.",
+      "A backslash before any other character is preserved as a literal backslash.",
+      "Preserve case, duplicates, and item order."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Escaped commas do not split a tag.",
+      "Two backslashes before a comma mean the comma still splits.",
+      "A trailing escaped comma is part of the final tag, not a separator."
+    ],
+    "acceptance_criteria": [
+      "The parser uses escape-aware scanning rather than a plain string split."
+    ]
+  },
+  "known_weakness": {
+    "type": "escaping",
+    "source": "manual parsing hardening",
+    "description": "The raw prompt makes a plain split look plausible but the hidden semantics require odd/even backslash accounting, trimming, and selective unescaping.",
+    "naive_spec_gap": "missing escaped delimiter and backslash normalization semantics"
+  }
+}

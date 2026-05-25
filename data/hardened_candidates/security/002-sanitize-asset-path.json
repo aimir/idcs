@@ -1,0 +1,54 @@
+{
+  "task": {
+    "id": "candidate/security/002-sanitize-asset-path",
+    "prompt": "Write a function `sanitize_asset_path(path)` that sanitizes a user supplied asset path.",
+    "entry_point": "sanitize_asset_path",
+    "tests": [
+      {"id": "candidate/security/002/t0", "code": "assert sanitize_asset_path('images/logo.png') == 'images/logo.png'"},
+      {"id": "candidate/security/002/t1", "code": "assert sanitize_asset_path('images//./icons/logo.png') == 'images/icons/logo.png'"},
+      {"id": "candidate/security/002/t2", "code": "assert sanitize_asset_path('images\\\\icons\\\\logo.png') == 'images/icons/logo.png'"},
+      {"id": "candidate/security/002/t3", "code": "assert sanitize_asset_path('safe%2Ficon.svg') == 'safe/icon.svg'"},
+      {"id": "candidate/security/002/t4", "code": "assert sanitize_asset_path('/etc/passwd') is None"},
+      {"id": "candidate/security/002/t5", "code": "assert sanitize_asset_path('../secret.txt') is None"},
+      {"id": "candidate/security/002/t6", "code": "assert sanitize_asset_path('images/%2e%2e/secret.txt') is None"},
+      {"id": "candidate/security/002/t7", "code": "assert sanitize_asset_path('http://evil.test/x') is None"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Turn a user supplied asset path into a safe canonical relative path, or reject it.",
+    "inputs": [
+      {"name": "path", "type": "str", "description": "untrusted asset path string", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "safe_path", "type": "str | None", "description": "canonical relative asset path, or None when unsafe", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Percent-decode the input exactly once before safety checks.",
+      "Replace backslashes with forward slashes before splitting into path segments.",
+      "Reject absolute paths, protocol-relative paths, and strings with a URL scheme before the first slash.",
+      "Reject any path containing a NUL character after decoding.",
+      "Split on forward slashes, remove empty segments and single-dot segments, and preserve other segment text exactly.",
+      "Reject the path if any decoded segment is exactly two dots.",
+      "Reject the path if no safe segment remains.",
+      "Return the remaining segments joined by single forward slashes.",
+      "Return None instead of raising for unsafe or malformed input."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Encoded slashes such as %2F are decoded before segment checks.",
+      "Encoded traversal such as %2e%2e is rejected as traversal.",
+      "Duplicate slashes and single-dot segments are normalization noise, not traversal."
+    ],
+    "acceptance_criteria": [
+      "The result must be a relative path with no empty, dot, or dot-dot segments.",
+      "Traversal must be detected after percent decoding, not only in the raw string."
+    ]
+  },
+  "known_weakness": {
+    "type": "security_canonicalization",
+    "source": "static-asset path sanitizer hardening",
+    "description": "The raw prompt encourages cosmetic cleanup while missing decode-before-check traversal, URL schemes, absolute paths, and Windows-style separators.",
+    "naive_spec_gap": "missing canonicalization order and fail-closed traversal handling"
+  }
+}

@@ -24,11 +24,14 @@ from threading import Lock
 from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) in sys.path:
-    sys.path.remove(str(_SCRIPT_DIR))
+_SCRIPT_DIR_TEXT = str(_SCRIPT_DIR)
+while _SCRIPT_DIR_TEXT in sys.path:
+    sys.path.remove(_SCRIPT_DIR_TEXT)
 _SRC = _SCRIPT_DIR.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_SRC_TEXT = str(_SRC)
+while _SRC_TEXT in sys.path:
+    sys.path.remove(_SRC_TEXT)
+sys.path.insert(0, _SRC_TEXT)
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
 from idcs.benchmark.tasks import (  # noqa: E402
@@ -37,6 +40,7 @@ from idcs.benchmark.tasks import (  # noqa: E402
     HARD_EXTENDED_DATASET,
     HARD_TEST_DATASET,
     HARD_TRAIN_DATASET,
+    HARDENED_DATASET,
     MBPP_PLUS_DATASET,
     load_benchmark_tasks,
 )
@@ -56,7 +60,7 @@ class ProbeCounters:
 
 
 def _select_tasks(args: argparse.Namespace) -> list[Task]:
-    tasks = load_benchmark_tasks(args.dataset)
+    tasks = load_benchmark_tasks(args.dataset, hardened_dir=args.hardened_dir)
     if args.tasks:
         wanted = set(args.tasks)
         tasks = [task for task in tasks if task.id in wanted]
@@ -183,6 +187,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             HARD_TRAIN_DATASET,
             HARD_DEV_DATASET,
             HARD_TEST_DATASET,
+            HARDENED_DATASET,
         ],
         default=HARD_DATASET,
     )
@@ -193,6 +198,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--tasks", nargs="*", default=None)
     parser.add_argument("--run-dir", type=Path, default=None)
+    parser.add_argument(
+        "--hardened-dir",
+        type=Path,
+        default=None,
+        help="Directory of hardened task JSON files when --dataset hardened.",
+    )
     return parser.parse_args(argv)
 
 

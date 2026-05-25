@@ -17,11 +17,14 @@ from pathlib import Path
 
 # Make `idcs` importable without requiring `pip install -e .`
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) in sys.path:
-    sys.path.remove(str(_SCRIPT_DIR))
+_SCRIPT_DIR_TEXT = str(_SCRIPT_DIR)
+while _SCRIPT_DIR_TEXT in sys.path:
+    sys.path.remove(_SCRIPT_DIR_TEXT)
 _SRC = _SCRIPT_DIR.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_SRC_TEXT = str(_SRC)
+while _SRC_TEXT in sys.path:
+    sys.path.remove(_SRC_TEXT)
+sys.path.insert(0, _SRC_TEXT)
 
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402

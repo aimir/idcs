@@ -1,0 +1,54 @@
+{
+  "task": {
+    "id": "candidate/security/001-allowed-redirect-host",
+    "prompt": "Write a function `is_allowed_redirect(url, allowed_hosts)` that checks whether a redirect URL is allowed.",
+    "entry_point": "is_allowed_redirect",
+    "tests": [
+      {"id": "candidate/security/001/t0", "code": "assert is_allowed_redirect('/dashboard?next=https://evil.test', ['example.com']) is True"},
+      {"id": "candidate/security/001/t1", "code": "assert is_allowed_redirect('https://example.com/welcome', ['example.com']) is True"},
+      {"id": "candidate/security/001/t2", "code": "assert is_allowed_redirect('https://EXAMPLE.com./welcome', ['example.com']) is True"},
+      {"id": "candidate/security/001/t3", "code": "assert is_allowed_redirect('https://login.trusted.example/path', ['.trusted.example']) is True"},
+      {"id": "candidate/security/001/t4", "code": "assert is_allowed_redirect('https://example.com.evil.test/', ['example.com']) is False"},
+      {"id": "candidate/security/001/t5", "code": "assert is_allowed_redirect('https://example.com@evil.test/', ['example.com']) is False"},
+      {"id": "candidate/security/001/t6", "code": "assert is_allowed_redirect('//evil.test/path', ['example.com']) is False"},
+      {"id": "candidate/security/001/t7", "code": "assert is_allowed_redirect('javascript:alert(1)', ['example.com']) is False"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Decide whether a redirect target stays on an allowed site without being fooled by URL parsing tricks.",
+    "inputs": [
+      {"name": "url", "type": "str", "description": "redirect target supplied by a user", "constraints": []},
+      {"name": "allowed_hosts", "type": "list[str]", "description": "allowed host patterns", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "allowed", "type": "bool", "description": "True only when the redirect target is safe to use", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Return True for a site-relative URL that starts with exactly one forward slash, contains no backslash, and is not protocol-relative.",
+      "For absolute URLs, allow only http and https schemes.",
+      "Reject absolute URLs that contain username or password userinfo.",
+      "Canonicalize the parsed hostname by lowercasing it and stripping trailing dots before comparison.",
+      "Canonicalize allowed host entries the same way, except preserve whether an entry started with a leading dot.",
+      "An allowed host without a leading dot matches only that exact canonical host.",
+      "An allowed host with a leading dot matches only strict subdomains of that suffix, so .example.com matches a.example.com but not example.com.",
+      "Never use substring matching; example.com.evil.test and userinfo such as example.com@evil.test must not match example.com.",
+      "Reject missing hosts, protocol-relative URLs, malformed URLs, and non-http schemes."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "A trailing dot on a hostname does not change the host identity.",
+      "Host comparison is case-insensitive.",
+      "A site-relative path may contain an external URL in its query string and still be a local redirect target."
+    ],
+    "acceptance_criteria": [
+      "The decision must be based on the parsed canonical hostname, not on whether an allowed host appears anywhere in the string."
+    ]
+  },
+  "known_weakness": {
+    "type": "security_host_matching",
+    "source": "open-redirect allowlist hardening",
+    "description": "The raw prompt invites substring checks and misses protocol-relative URLs, userinfo, trailing-dot canonicalization, and strict subdomain semantics.",
+    "naive_spec_gap": "missing parsed-host comparison and fail-closed redirect rules"
+  }
+}

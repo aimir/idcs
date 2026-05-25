@@ -1,0 +1,48 @@
+{
+  "task": {
+    "id": "hardened/005-primary-contact",
+    "prompt": "Write a function `pick_primary_contact(contacts)` that chooses the primary contact from a list.",
+    "entry_point": "pick_primary_contact",
+    "tests": [
+      {"id": "hardened/005/t0", "code": "contacts = [{'email': 'a@example.com', 'verified': True, 'priority': 2, 'updated_at': 10}, {'email': 'b@example.com', 'verified': True, 'priority': 1, 'updated_at': 5}]\nassert pick_primary_contact(contacts) == 'b@example.com'"},
+      {"id": "hardened/005/t1", "code": "contacts = [{'email': 'a@example.com', 'verified': False, 'priority': 0, 'updated_at': 99}, {'email': 'b@example.com', 'verified': True, 'priority': 5, 'updated_at': 1}]\nassert pick_primary_contact(contacts) == 'b@example.com'"},
+      {"id": "hardened/005/t2", "code": "contacts = [{'email': 'old@example.com', 'verified': True, 'priority': 1, 'updated_at': 1}, {'email': 'new@example.com', 'verified': True, 'priority': 1, 'updated_at': 2}]\nassert pick_primary_contact(contacts) == 'new@example.com'"},
+      {"id": "hardened/005/t3", "code": "contacts = [{'email': 'first@example.com', 'verified': True, 'priority': 1, 'updated_at': 2}, {'email': 'second@example.com', 'verified': True, 'priority': 1, 'updated_at': 2}]\nassert pick_primary_contact(contacts) == 'first@example.com'"},
+      {"id": "hardened/005/t4", "code": "assert pick_primary_contact([{'verified': True, 'priority': 0, 'updated_at': 1}]) is None"},
+      {"id": "hardened/005/t5", "code": "assert pick_primary_contact([]) is None"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Choose one primary contact email from contact records using deterministic business rules.",
+    "inputs": [
+      {"name": "contacts", "type": "list[dict]", "description": "contact records with email, verified, priority, and updated_at fields", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "email", "type": "str | None", "description": "selected contact email, or None when no eligible contact exists", "constraints": []}
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Eligible contacts must have a truthy string email and verified is exactly True.",
+      "Ignore contacts missing email or with verified not exactly True.",
+      "Lower priority numbers are preferred.",
+      "When priority ties, prefer the contact with the greatest updated_at value.",
+      "When both priority and updated_at tie, prefer the earliest contact in input order.",
+      "Return only the selected email string, not the whole contact."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Empty input returns None.",
+      "If no eligible contact exists, return None.",
+      "Unverified contacts never win, even with better priority."
+    ],
+    "acceptance_criteria": [
+      "Selection is deterministic for every input order."
+    ]
+  },
+  "known_weakness": {
+    "type": "implicit_assumption",
+    "source": "business-rule selection hardening",
+    "description": "The raw prompt leaves eligibility, priority direction, tie-breaking, and return shape unspecified.",
+    "naive_spec_gap": "missing deterministic selection policy"
+  }
+}

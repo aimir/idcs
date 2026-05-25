@@ -1,0 +1,54 @@
+{
+  "task": {
+    "id": "candidate/data_shapes/003-apply-defaults-no-alias",
+    "prompt": "Write a function `apply_defaults(config, defaults)` that fills missing values in a config dictionary.",
+    "entry_point": "apply_defaults",
+    "tests": [
+      {"id": "candidate/data_shapes/003/t0", "code": "assert apply_defaults({'retries': 0}, {'retries': 3, 'timeout': 10}) == {'retries': 0, 'timeout': 10}"},
+      {"id": "candidate/data_shapes/003/t1", "code": "config = {'db': {'host': 'localhost'}}\ndefaults = {'db': {'host': 'remote', 'port': 5432}, 'debug': False}\nassert apply_defaults(config, defaults) == {'db': {'host': 'localhost', 'port': 5432}, 'debug': False}"},
+      {"id": "candidate/data_shapes/003/t2", "code": "assert apply_defaults({'token': None, 'flags': []}, {'token': 'default', 'flags': ['x']}) == {'token': None, 'flags': []}"},
+      {"id": "candidate/data_shapes/003/t3", "code": "config = {}\ndefaults = {'items': [], 'coords': (1, 2), 'nested': {'tags': ['a']}}\nout = apply_defaults(config, defaults)\nout['items'].append('new')\nout['nested']['tags'].append('b')\nassert defaults == {'items': [], 'coords': (1, 2), 'nested': {'tags': ['a']}}\nassert out['coords'] == (1, 2)\nassert isinstance(out['coords'], tuple)"},
+      {"id": "candidate/data_shapes/003/t4", "code": "config = {'a': {'b': 1}, 'keep': [1]}\ndefaults = {'a': {'c': 2}, 'keep': [9]}\noriginal_config = {'a': {'b': 1}, 'keep': [1]}\noriginal_defaults = {'a': {'c': 2}, 'keep': [9]}\nout = apply_defaults(config, defaults)\nassert out == {'a': {'b': 1, 'c': 2}, 'keep': [1]}\nout['a']['b'] = 99\nout['keep'].append(2)\nassert config == original_config\nassert defaults == original_defaults"},
+      {"id": "candidate/data_shapes/003/t5", "code": "config = {'section': 'disabled'}\ndefaults = {'section': {'enabled': True}}\nassert apply_defaults(config, defaults) == {'section': 'disabled'}"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Return a new config dictionary where absent keys are filled from defaults without aliasing mutable values.",
+    "inputs": [
+      {"name": "config", "type": "dict", "description": "user-provided config values", "constraints": []},
+      {"name": "defaults", "type": "dict", "description": "default config values", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "merged", "type": "dict", "description": "new dictionary with defaults applied", "constraints": []}
+    ],
+    "preconditions": [
+      "config and defaults are ordinary dictionaries.",
+      "Nested dictionaries, lists, and tuples may appear as values."
+    ],
+    "postconditions": [
+      "Missing means a key is absent from config, not that the value is falsey or None.",
+      "For each key in config, preserve config's value unless both config and defaults have dictionaries at that key.",
+      "When both values for a key are dicts, recursively apply defaults inside that nested dict.",
+      "For keys absent from config, copy the value from defaults.",
+      "Copy nested dicts, lists, and tuples into the result so the result aliases neither input.",
+      "Preserve tuple values as tuples.",
+      "Do not mutate config, defaults, or any nested container in either input."
+    ],
+    "invariants": [],
+    "edge_cases": [
+      "Existing values None, 0, False, empty string, and empty list are not missing.",
+      "A scalar config value blocks a default dictionary at the same key.",
+      "Default mutable containers must be safe to mutate in the returned result."
+    ],
+    "acceptance_criteria": [
+      "The merge is recursive for dictionaries only.",
+      "The returned structure is independent from both input structures."
+    ]
+  },
+  "known_weakness": {
+    "type": "aliasing_mutation",
+    "source": "manual data-shape hardening",
+    "description": "The raw prompt leaves 'missing' undefined and encourages shallow dict updates that overwrite falsey values or alias nested defaults.",
+    "naive_spec_gap": "missing absent-key semantics, recursive merge rule, no-alias copying, and non-mutation guarantees"
+  }
+}

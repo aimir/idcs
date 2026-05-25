@@ -1,0 +1,55 @@
+{
+  "task": {
+    "id": "candidate/data_shapes/001-compact-nested-none",
+    "prompt": "Write a function `compact_data(data)` that removes empty values from nested data.",
+    "entry_point": "compact_data",
+    "tests": [
+      {"id": "candidate/data_shapes/001/t0", "code": "assert compact_data({'a': None, 'b': 0, 'c': False, 'd': '', 'e': []}) == {'b': 0, 'c': False, 'd': '', 'e': []}"},
+      {"id": "candidate/data_shapes/001/t1", "code": "result = compact_data({'x': [1, None, (2, None, {'y': None, 'z': 3})]})\nassert result == {'x': [1, (2, {'z': 3})]}\nassert isinstance(result['x'], list)\nassert isinstance(result['x'][1], tuple)"},
+      {"id": "candidate/data_shapes/001/t2", "code": "assert compact_data((None, {'a': None, 'b': [None, 'ok']}, (None,))) == ({'b': ['ok']}, ())"},
+      {"id": "candidate/data_shapes/001/t3", "code": "data = {'outer': [{'keep': None, 'nested': (None, 4)}], 'empty': {}}\noriginal = {'outer': [{'keep': None, 'nested': (None, 4)}], 'empty': {}}\nout = compact_data(data)\nassert data == original\nassert out == {'outer': [{'nested': (4,)}], 'empty': {}}"},
+      {"id": "candidate/data_shapes/001/t4", "code": "assert compact_data([None, [], {}, (), 0]) == [[], {}, (), 0]"},
+      {"id": "candidate/data_shapes/001/t5", "code": "assert compact_data(None) is None\nassert compact_data('') == ''"}
+    ]
+  },
+  "gold_spec": {
+    "goal": "Recursively remove values that are exactly None from nested Python data while preserving structure.",
+    "inputs": [
+      {"name": "data", "type": "object", "description": "a scalar, dict, list, or tuple containing nested supported values", "constraints": []}
+    ],
+    "outputs": [
+      {"name": "cleaned", "type": "object", "description": "data with None values removed from containers", "constraints": []}
+    ],
+    "preconditions": [
+      "Containers are ordinary dict, list, and tuple instances.",
+      "Only container traversal is required; all other values are returned as values."
+    ],
+    "postconditions": [
+      "Remove dict entries whose value is exactly None before or after recursion.",
+      "Remove list and tuple elements that are exactly None.",
+      "Recurse into dict values, list elements, and tuple elements that remain.",
+      "Preserve dict insertion order.",
+      "Preserve container type: lists return lists and tuples return tuples.",
+      "Keep falsey non-None values such as 0, False, empty string, empty dict, empty list, and empty tuple.",
+      "Do not mutate the input object or any nested container."
+    ],
+    "invariants": [
+      "No returned container should contain an element or dict value that is exactly None."
+    ],
+    "edge_cases": [
+      "A top-level None returns None because there is no parent container to remove it from.",
+      "Empty containers are preserved.",
+      "Single-element tuples must remain tuples."
+    ],
+    "acceptance_criteria": [
+      "The result has the same recursive container shape except for removed None values.",
+      "The implementation never converts tuples to lists or drops other falsey values."
+    ]
+  },
+  "known_weakness": {
+    "type": "data_shape_recursion",
+    "source": "manual data-shape hardening",
+    "description": "The raw prompt says 'empty values', which commonly causes models to remove all falsey values, mutate in place, or collapse tuples into lists during recursion.",
+    "naive_spec_gap": "missing exact removal predicate, recursive container-type preservation, and non-mutation semantics"
+  }
+}

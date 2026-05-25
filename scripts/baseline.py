@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) in sys.path:
-    sys.path.remove(str(_SCRIPT_DIR))
+_SCRIPT_DIR_TEXT = str(_SCRIPT_DIR)
+while _SCRIPT_DIR_TEXT in sys.path:
+    sys.path.remove(_SCRIPT_DIR_TEXT)
 _SRC = _SCRIPT_DIR.parent / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_SRC_TEXT = str(_SRC)
+while _SRC_TEXT in sys.path:
+    sys.path.remove(_SRC_TEXT)
+sys.path.insert(0, _SRC_TEXT)
 
 from idcs.benchmark.scoring import score  # noqa: E402
 from idcs.benchmark.tasks import (  # noqa: E402
@@ -33,16 +36,18 @@ from idcs.benchmark.tasks import (  # noqa: E402
     HARD_EXTENDED_DATASET,
     HARD_TEST_DATASET,
     HARD_TRAIN_DATASET,
+    HARDENED_DATASET,
     MBPP_PLUS_DATASET,
     load_benchmark_tasks,
+    load_hardened_items,
 )
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
 from idcs.llm import LLM  # noqa: E402
 from idcs.orchestrator import run_episode  # noqa: E402
-from idcs.schemas import Task  # noqa: E402
-from idcs.user_proxy import NullUserProxy  # noqa: E402
+from idcs.schemas import Spec, Task  # noqa: E402
+from idcs.user_proxy import NullUserProxy, OracleUserProxy  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,6 +90,43 @@ def run_baseline_b(
     return score(task, code)
 
 
+def run_baseline_c(
+    coder: Coder,
+    generator: Generator,
+    distinguisher: Distinguisher,
+    llm: LLM,
+    task: Task,
+    gold_spec: Spec,
+    max_turns: int,
+) -> float:
+    """Clarified: prompt → spec via G/D + oracle answers → code."""
+    log.info("  (c) orchestrator with oracle clarification (max_turns=%d)...", max_turns)
+    t0 = time.time()
+    oracle = OracleUserProxy(llm, gold_spec_text=gold_spec.model_dump_json(indent=2))
+    trace = run_episode(task, generator, distinguisher, oracle, max_turns=max_turns)
+    log.info(
+        "  (c) clarified spec done (%.1fs, %d turns)",
+        time.time() - t0,
+        len(trace.turns),
+    )
+    if trace.final_spec is None:
+        return 0.0
+    log.info("  (c) coder.from_clarified_spec...")
+    t1 = time.time()
+    code = coder.from_spec(trace.final_spec, task.prompt)
+    log.info("  (c) done (%.1fs, %d chars)", time.time() - t1, len(code))
+    return score(task, code)
+
+
+def run_baseline_d(coder: Coder, task: Task, gold_spec: Spec) -> float:
+    """Gold-spec lane: oracle spec -> code."""
+    log.info("  (d) coder.from_gold_spec...")
+    t0 = time.time()
+    code = coder.from_spec(gold_spec, task.prompt)
+    log.info("  (d) done (%.1fs, %d chars)", time.time() - t0, len(code))
+    return score(task, code)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -96,6 +138,7 @@ def main() -> int:
             HARD_TRAIN_DATASET,
             HARD_DEV_DATASET,
             HARD_TEST_DATASET,
+            HARDENED_DATASET,
         ],
         default=MBPP_PLUS_DATASET,
         help="benchmark slice to run",
@@ -107,13 +150,24 @@ def main() -> int:
     parser.add_argument("--tasks", nargs="*", default=None, help="specific task IDs")
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42, help="random seed for --sample")
+    parser.add_argument(
+        "--hardened-dir",
+        type=Path,
+        default=None,
+        help="Directory of hardened task JSON files when --dataset hardened.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    tasks = load_benchmark_tasks(args.dataset)
+    if args.dataset == HARDENED_DATASET:
+        hardened_items = load_hardened_items(args.hardened_dir)
+        gold_specs = {item.task.id: item.gold_spec for item in hardened_items}
+    else:
+        gold_specs = {}
+    tasks = load_benchmark_tasks(args.dataset, hardened_dir=args.hardened_dir)
     total_available = len(tasks)
     if args.tasks:
         tasks = [t for t in tasks if t.id in args.tasks]
@@ -157,10 +211,46 @@ def main() -> int:
         t_task = time.time()
         score_a = run_baseline_a(coder, task)
         score_b = run_baseline_b(coder, generator, distinguisher, task, args.max_turns)
+        score_c = (
+            run_baseline_c(
+                coder,
+                generator,
+                distinguisher,
+                llm,
+                task,
+                gold_specs[task.id],
+                args.max_turns,
+            )
+            if task.id in gold_specs
+            else None
+        )
+        score_d = (
+            run_baseline_d(coder, task, gold_specs[task.id])
+            if task.id in gold_specs
+            else None
+        )
         tag = "WIN" if score_b > score_a else ("LOSE" if score_b < score_a else "TIE")
+        clarified_tag = (
+            "CLARIFIED-RESCUE"
+            if score_c is not None and score_a < 1.0 <= score_c
+            else "NO-GOLD"
+            if score_c is None
+            else "CLARIFIED-FAIL"
+            if score_c < 1.0
+            else "CLARIFIED-PASS"
+        )
         elapsed = time.time() - t_task
-        results.append({"task_id": task.id, "a": score_a, "b": score_b})
-        print(f"  => (a)={score_a:.2f}  (b)={score_b:.2f}  {tag}  [{elapsed:.1f}s]\n")
+        results.append(
+            {"task_id": task.id, "a": score_a, "b": score_b, "c": score_c, "d": score_d}
+        )
+        if score_c is None:
+            print(f"  => (a)={score_a:.2f}  (b)={score_b:.2f}  {tag}  [{elapsed:.1f}s]\n")
+        else:
+            print(
+                f"  => (a)={score_a:.2f}  (b)={score_b:.2f}  "
+                f"(c)={score_c:.2f}  (d)={score_d:.2f}  {tag}/{clarified_tag}  "
+                f"[{elapsed:.1f}s]\n"
+            )
 
     total_time = time.time() - t_start
     avg_a = sum(r["a"] for r in results) / len(results)
@@ -168,10 +258,19 @@ def main() -> int:
     wins = sum(1 for r in results if r["b"] > r["a"])
     losses = sum(1 for r in results if r["b"] < r["a"])
     ties = sum(1 for r in results if r["b"] == r["a"])
+    clarified_rescues = sum(
+        1 for r in results if r["c"] is not None and r["a"] < 1.0 <= r["c"]
+    )
+    gold_rescues = sum(
+        1 for r in results if r["d"] is not None and r["a"] < 1.0 <= r["d"]
+    )
 
     print(f"{'='*50}")
     print(f"Aggregate: (a)={avg_a:.3f}  (b)={avg_b:.3f}  (plus-input tests only)")
     print(f"Record: {wins}W / {losses}L / {ties}T")
+    if gold_specs:
+        print(f"Clarified-spec rescues: {clarified_rescues}/{len(results)}")
+        print(f"Gold-spec upper-bound rescues: {gold_rescues}/{len(results)}")
     print(f"Time: {total_time:.0f}s total, {total_time/len(results):.1f}s/task")
     if avg_b >= avg_a:
         print("Phase 2 EXIT CRITERION MET: (b) does not regress vs (a)")

@@ -11,11 +11,14 @@ its full dependency tree (numpy, datasets, transformers, ...).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from idcs.benchmark.scoring import EQUALITY_HELPER_SRC, INFINITY_LITERAL_PRELUDE
-from idcs.schemas import Task, Test
+from idcs.schemas import Spec, Task, Test
 
 MBPP_PLUS_DATASET = "mbpp-plus"
 HARD_DATASET = "hard"
@@ -23,6 +26,8 @@ HARD_EXTENDED_DATASET = "hard-extended"
 HARD_TRAIN_DATASET = "hard-train"
 HARD_DEV_DATASET = "hard-dev"
 HARD_TEST_DATASET = "hard-test"
+HARDENED_DATASET = "hardened"
+DEFAULT_HARDENED_DIR = Path(__file__).resolve().parents[3] / "data" / "hardened_tasks"
 
 # Small MBPP+ slice chosen by direct-only probing for underspecified edge
 # semantics rather than algorithmic difficulty. These are tasks where
@@ -71,6 +76,17 @@ HARD_MBPP_EXTENDED_IDS: tuple[str, ...] = (
     *HARD_MBPP_DEV_IDS,
     *HARD_MBPP_TEST_IDS,
 )
+
+
+@dataclass(frozen=True)
+class HardenedItem:
+    """One curated task whose raw prompt is weaker than its gold spec."""
+
+    path: Path
+    task: Task
+    gold_spec: Spec
+    known_weakness: dict[str, Any]
+
 
 def load_mbpp_plus(
     *,
@@ -127,9 +143,44 @@ def load_mbpp_hard_split(
     )
 
 
+def load_hardened_items(
+    hardened_dir: Path | None = None,
+) -> list[HardenedItem]:
+    """Load the file-backed hardened corpus with oracle-only gold specs."""
+    directory = hardened_dir or DEFAULT_HARDENED_DIR
+    items: list[HardenedItem] = []
+    for path in sorted(directory.rglob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError(f"{path} must contain a JSON object.")
+        missing = {"task", "gold_spec"} - raw.keys()
+        if missing:
+            raise ValueError(f"{path} missing required field(s): {', '.join(sorted(missing))}")
+        known_weakness = raw.get("known_weakness", {})
+        if not isinstance(known_weakness, dict):
+            raise ValueError(f"{path} field 'known_weakness' must be an object when present.")
+        items.append(
+            HardenedItem(
+                path=path,
+                task=Task.model_validate(raw["task"]),
+                gold_spec=Spec.model_validate(raw["gold_spec"]),
+                known_weakness=known_weakness,
+            )
+        )
+    return items
+
+
+def load_hardened_tasks(
+    hardened_dir: Path | None = None,
+) -> list[Task]:
+    """Return only the Task objects for the hardened corpus."""
+    return [item.task for item in load_hardened_items(hardened_dir)]
+
+
 def load_benchmark_tasks(
     dataset: str,
     *,
+    hardened_dir: Path | None = None,
     max_plus_inputs: int | None = None,
 ) -> list[Task]:
     """Load a named benchmark dataset used by the scripts."""
@@ -143,8 +194,11 @@ def load_benchmark_tasks(
         HARD_TEST_DATASET,
     }:
         return load_mbpp_hard_split(dataset, max_plus_inputs=max_plus_inputs)
+    if dataset == HARDENED_DATASET:
+        return load_hardened_tasks(hardened_dir)
     raise ValueError(
-        f"Unknown dataset {dataset!r}; expected '{MBPP_PLUS_DATASET}' or a hard split."
+        f"Unknown dataset {dataset!r}; expected '{MBPP_PLUS_DATASET}', a hard split, "
+        f"or '{HARDENED_DATASET}'."
     )
 
 
