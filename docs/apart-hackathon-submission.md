@@ -93,10 +93,10 @@ The hand-written spec-guided pipeline (default generator/distinguisher/coder, Co
 
 | Task | Function | Direct plus pass | Spec-guided plus pass | Result |
 | --- | --- | ---: | ---: | --- |
-| `Mbpp/427` | `change_date_format` | 3/112 | 12/112 | no change |
+| `Mbpp/427` | `change_date_format` | 12/112 | 12/112 | no change |
 | `Mbpp/639` | `sample_nam` | 2/111 | 2/111 | no change |
 | `Mbpp/459` | `remove_uppercase` | 25/103 | 25/103 | no change |
-| `Mbpp/92`  | `is_undulating` | 32/101 | 101/101 | rescued |
+| `Mbpp/92`  | `is_undulating` | 23/101 | 101/101 | rescued |
 | `Mbpp/597` | `find_kth` | 39/104 | 39/104 | no change |
 | **Total** | 5 tasks | **101/531 = 19.0%** | **179/531 = 33.7%** | **1 rescue, 0 regressions** |
 
