@@ -27,7 +27,15 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from idcs.benchmark.scoring import score  # noqa: E402
-from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
@@ -81,7 +89,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset",
-        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        choices=[
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+        ],
         default=MBPP_PLUS_DATASET,
         help="benchmark slice to run",
     )

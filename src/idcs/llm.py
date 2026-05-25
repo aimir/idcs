@@ -42,6 +42,7 @@ CODEX_BACKEND = "codex"
 DEFAULT_CODEX_MODEL = "gpt-5.4-mini"
 DEFAULT_CODEX_TIMEOUT_S = 300.0
 MAX_RETRIES = 5
+JSON_REPAIR_ATTEMPTS = 2
 
 
 class BudgetExceededError(RuntimeError):
@@ -232,10 +233,18 @@ class LLM:
         if self.backend == CODEX_BACKEND:
             # Codex has no structured-output API; we always parse JSON from
             # text. Record it so telemetry reflects that every codex typed
-            # call is on the fallback path.
+            # call is on the fallback path. Parsing goes through the repair
+            # helper so a single malformed response can be retried with a
+            # corrective follow-up before we give up.
             self._record_structured_fallback(output_type.__name__, "codex_backend")
             raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-            return _parse_json_response(raw, output_type)
+            return self._parse_typed_with_repair(
+                system,
+                augmented_user,
+                raw,
+                output_type,
+                max_tokens=max_tokens,
+            )
 
         fallback_reason: str | None = None
         calls_before_parse = self.calls_made
@@ -267,7 +276,50 @@ class LLM:
         self._record_structured_fallback(output_type.__name__, fallback_reason or "unknown")
 
         raw = self.complete(system, augmented_user, max_tokens=max_tokens)
-        return _parse_json_response(raw, output_type)
+        return self._parse_typed_with_repair(
+            system,
+            augmented_user,
+            raw,
+            output_type,
+            max_tokens=max_tokens,
+        )
+
+    def _parse_typed_with_repair(
+        self,
+        system: str,
+        original_user: str,
+        raw: str,
+        output_type: type[T],
+        *,
+        max_tokens: int,
+    ) -> T:
+        """Parse typed JSON, retrying repair prompts when a text backend emits invalid JSON."""
+        try:
+            return _parse_json_response(raw, output_type)
+        except RuntimeError as exc:
+            last_raw = raw
+            last_error = str(exc)
+
+        for _ in range(JSON_REPAIR_ATTEMPTS):
+            repair_user = _json_repair_prompt(
+                original_user,
+                last_raw,
+                last_error,
+                output_type,
+            )
+            repaired = self.complete(system, repair_user, max_tokens=max_tokens)
+            try:
+                return _parse_json_response(repaired, output_type)
+            except RuntimeError as exc:
+                # Only count a repair attempt against the fallback metric if
+                # the repair itself failed to parse. Successful repairs are
+                # not re-counted — the initial backend record already covered
+                # the fact that we left the structured-output path.
+                self._record_structured_fallback(output_type.__name__, "json_repair")
+                last_raw = repaired
+                last_error = str(exc)
+
+        raise RuntimeError(last_error)
 
     def _record_structured_fallback(self, output_type_name: str, reason: str) -> None:
         self.structured_fallback_count += 1
@@ -337,6 +389,7 @@ class LLM:
                 "exec",
                 "--model",
                 self.model,
+                *_codex_config_args(),
                 "--sandbox",
                 "read-only",
                 "--ephemeral",
@@ -378,6 +431,84 @@ def _float_env(name: str, default: float) -> float:
         return float(value)
     except ValueError as exc:
         raise ValueError(f"{name} must be a number.") from exc
+
+
+def runtime_snapshot(llm: Any | None = None) -> dict[str, Any]:
+    """Return non-secret LLM runtime metadata for benchmark artifacts."""
+    backend = str(
+        getattr(llm, "backend", None)
+        or os.environ.get("IDCS_BACKEND")
+        or DEFAULT_BACKEND
+    ).lower()
+    model = getattr(llm, "model", None)
+    if model is None:
+        model = (
+            os.environ.get("IDCS_CODEX_MODEL")
+            if backend == CODEX_BACKEND
+            else os.environ.get("IDCS_MODEL")
+        )
+    if model is None:
+        model = DEFAULT_CODEX_MODEL if backend == CODEX_BACKEND else DEFAULT_MODEL
+
+    snapshot: dict[str, Any] = {
+        "backend": backend,
+        "model": model,
+    }
+    if backend == CODEX_BACKEND:
+        snapshot.update(
+            {
+                "codex_timeout_s": getattr(
+                    llm,
+                    "codex_timeout_s",
+                    _float_env("IDCS_CODEX_TIMEOUT_S", DEFAULT_CODEX_TIMEOUT_S),
+                ),
+                "codex_service_tier": os.environ.get("IDCS_CODEX_SERVICE_TIER"),
+                "codex_reasoning_effort": os.environ.get(
+                    "IDCS_CODEX_REASONING_EFFORT"
+                ),
+            }
+        )
+    else:
+        snapshot.update(
+            {
+                "base_url": os.environ.get("IDCS_BASE_URL") or DEFAULT_BASE_URL,
+                "require_parameters": getattr(llm, "require_parameters", True),
+            }
+        )
+    return snapshot
+
+
+def _codex_config_args() -> list[str]:
+    """Render optional Codex CLI config overrides for local benchmark calls."""
+    args: list[str] = []
+    config_env = {
+        "service_tier": os.environ.get("IDCS_CODEX_SERVICE_TIER"),
+        "model_reasoning_effort": os.environ.get("IDCS_CODEX_REASONING_EFFORT"),
+    }
+    for key, value in config_env.items():
+        if value:
+            args.extend(["-c", f"{key}={json.dumps(value)}"])
+    return args
+
+
+def _json_repair_prompt(
+    original_user: str,
+    raw: str,
+    error: str,
+    output_type: type[BaseModel],
+) -> str:
+    return (
+        "Your previous response could not be parsed as the requested JSON object.\n"
+        f"Output type: {output_type.__name__}\n"
+        f"Parse error:\n{error[:1000]}\n\n"
+        "Original request:\n"
+        f"{original_user}\n\n"
+        "Previous response:\n"
+        "```text\n"
+        f"{raw[:4000]}\n"
+        "```\n\n"
+        "Return only one valid JSON object. Do not include markdown fences or commentary."
+    )
 
 
 def _parse_json_response(raw: str, output_type: type[T]) -> T:

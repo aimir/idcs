@@ -191,6 +191,31 @@ def test_useful_clarification_rate_uses_baseline_when_provided() -> None:
     )
     # 1 clarification answered, Δ = 0.3 → rate = 0.3
     assert abs(breakdown.useful_clarification_rate - 0.3) < 1e-9
+    assert abs(breakdown.benchmark_delta - 0.3) < 1e-9
+    assert breakdown.regression_penalty == 0.0
+
+
+def test_baseline_regression_penalizes_both_roles() -> None:
+    """Candidates that lose hidden tests versus direct baseline are down-ranked."""
+    trace = Trace(
+        task_id="t",
+        turns=[Turn(spec=_minimal_spec(), issues=[])],
+        final_spec=_minimal_spec(),
+    )
+    weights = RewardWeights(min_spec_ratio=0.0, regression_penalty_weight=2.0)
+
+    breakdown = compute_reward_breakdown(
+        trace,
+        "p",
+        benchmark_score=0.25,
+        weights=weights,
+        baseline_score=0.5,
+    )
+
+    assert breakdown.benchmark_delta == -0.25
+    assert breakdown.regression_penalty == 0.25
+    assert breakdown.r_generator == -0.25
+    assert breakdown.r_distinguisher == -0.25
 
 
 def test_useful_clarification_rate_zero_when_no_clarifications() -> None:

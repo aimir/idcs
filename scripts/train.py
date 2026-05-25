@@ -18,7 +18,15 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from idcs._prompts import load_prompt  # noqa: E402
-from idcs.benchmark.tasks import load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.llm import LLM, BudgetExceededError  # noqa: E402
 from idcs.optimizer.coevolve import CoevolveConfig, coevolve  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
@@ -33,17 +41,63 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--benchmark", choices=["mbpp", "hard", "seed"], default="mbpp")
+    parser.add_argument(
+        "--benchmark",
+        choices=[
+            "mbpp",
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+            "seed",
+        ],
+        default="mbpp",
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--sample", type=int, default=None)
+    parser.add_argument("--tasks", nargs="*", default=None, help="specific task IDs")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--pop-size", type=int, default=8)
     parser.add_argument("--elite-size", type=int, default=3)
+    parser.add_argument(
+        "--elite-selection",
+        choices=["task_pareto", "mean"],
+        default="task_pareto",
+        help=(
+            "How to keep prompts between epochs. task_pareto preserves "
+            "specialists that are best on individual tasks; mean keeps the "
+            "older average-reward top-k behavior."
+        ),
+    )
+    parser.add_argument(
+        "--drop-anchor",
+        action="store_true",
+        help="Allow evolution to discard the original handwritten prompts.",
+    )
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--task-sample", type=int, default=None)
     parser.add_argument("--no-telemetry", action="store_true")
+    parser.add_argument("--generator-prompt-file", type=Path, default=None)
+    parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Override the main G/D/coder model for this run.",
+    )
+    parser.add_argument(
+        "--mutator-model",
+        type=str,
+        default=None,
+        help=(
+            "Override the prompt-mutator model. If it matches --model, "
+            "the run reuses the main LLM instance so call accounting stays shared."
+        ),
+    )
     parser.add_argument(
         "--val-fraction",
         type=float,
@@ -55,21 +109,35 @@ def main() -> int:
         type=int,
         default=None,
         help=(
-            "Hard ceiling on total LLM API calls (main + mutator). "
-            "Once hit, the next call raises BudgetExceededError and the run exits."
+            "Hard ceiling on main LLM API calls. If --mutator-model matches "
+            "--model, mutation calls share this cap too."
         ),
     )
     args = parser.parse_args()
 
-    llm = LLM(max_calls=args.max_llm_calls)
-    # Optional cheaper model for the mutator. Defaults to the main LLM if
-    # IDCS_MUTATOR_MODEL is unset.
-    mutator_model = os.environ.get("IDCS_MUTATOR_MODEL")
-    mutator_llm = LLM(model=mutator_model) if mutator_model else None
+    llm = LLM(model=args.model, max_calls=args.max_llm_calls)
+    # Optional separate model for the mutator. Defaults to the main LLM if
+    # neither --mutator-model nor IDCS_MUTATOR_MODEL is set.
+    mutator_model = args.mutator_model or os.environ.get("IDCS_MUTATOR_MODEL")
+    mutator_llm = (
+        LLM(model=mutator_model)
+        if mutator_model and mutator_model != llm.model
+        else None
+    )
     if mutator_llm is not None:
         print(f"Using {mutator_llm.model} for prompt mutations (main: {llm.model}).")
-    generator_prompt = load_prompt("generator_v0")
-    distinguisher_prompt = load_prompt("distinguisher_v0")
+    else:
+        print(f"Using {llm.model} for G/D/coder and prompt mutations.")
+    generator_prompt = (
+        args.generator_prompt_file.read_text(encoding="utf-8")
+        if args.generator_prompt_file
+        else load_prompt("generator_v0")
+    )
+    distinguisher_prompt = (
+        args.distinguisher_prompt_file.read_text(encoding="utf-8")
+        if args.distinguisher_prompt_file
+        else load_prompt("distinguisher_v0")
+    )
     tasks: list[Task]
     user_factory: Callable[[Task], UserProxy]
 
@@ -85,13 +153,21 @@ def main() -> int:
         user_factory = seed_user_factory
 
     else:
-        tasks = load_benchmark_tasks("hard" if args.benchmark == "hard" else "mbpp")
+        dataset = MBPP_PLUS_DATASET if args.benchmark == "mbpp" else args.benchmark
+        tasks = load_benchmark_tasks(dataset)
 
         def null_user_factory(task: Task) -> UserProxy:
             return NullUserProxy()
 
         user_factory = null_user_factory
 
+    if args.tasks:
+        task_ids = set(args.tasks)
+        tasks = [task for task in tasks if task.id in task_ids]
+        missing = sorted(task_ids - {task.id for task in tasks})
+        if missing:
+            print(f"Task IDs not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     if args.offset:
         tasks = tasks[args.offset:]
     if args.sample:
@@ -117,6 +193,8 @@ def main() -> int:
     config = CoevolveConfig(
         population_size=args.pop_size,
         elite_size=args.elite_size,
+        elite_selection=args.elite_selection,
+        keep_anchor=not args.drop_anchor,
         epochs=args.epochs,
         max_turns=args.max_turns,
         task_sample_size=args.task_sample,

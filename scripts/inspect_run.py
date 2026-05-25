@@ -44,6 +44,7 @@ def _print_config(run_dir: Path) -> None:
         return
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     print(f"model:        {cfg.get('model')}")
+    print(f"mutator:      {cfg.get('mutator_model') or cfg.get('model')}")
     weights = cfg.get("weights", {})
     print(f"weights:      α={weights.get('alpha')}  β={weights.get('beta')}  "
           f"γ={weights.get('gamma')}  δ={weights.get('delta')}  ε={weights.get('epsilon')}  "
@@ -52,6 +53,7 @@ def _print_config(run_dir: Path) -> None:
     print(f"pop/elite:    {config.get('population_size')}/{config.get('elite_size')}  "
           f"epochs={config.get('epochs')}  max_turns={config.get('max_turns')}  "
           f"task_sample={config.get('task_sample_size')}")
+    print(f"selection:    {config.get('elite_selection', 'mean')}")
     train_ids = cfg.get("train_task_ids", [])
     val_ids = cfg.get("val_task_ids", [])
     print(f"tasks:        {len(train_ids)} train, {len(val_ids)} val")

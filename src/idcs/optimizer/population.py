@@ -21,6 +21,10 @@ class PromptCandidate:
     prompt: str
     reward: float = 0.0
     breakdowns: list[RewardBreakdown] = field(default_factory=list)
+    failure_summaries: list[str] = field(default_factory=list)
+    task_ids: list[str] = field(default_factory=list)
+    frontier_task_ids: list[str] = field(default_factory=list)
+    anchor: bool = False
 
 
 @dataclass

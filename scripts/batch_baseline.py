@@ -36,11 +36,19 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from idcs.benchmark.scoring import score_detailed  # noqa: E402
-from idcs.benchmark.tasks import HARD_DATASET, MBPP_PLUS_DATASET, load_benchmark_tasks  # noqa: E402
+from idcs.benchmark.tasks import (  # noqa: E402
+    HARD_DATASET,
+    HARD_DEV_DATASET,
+    HARD_EXTENDED_DATASET,
+    HARD_TEST_DATASET,
+    HARD_TRAIN_DATASET,
+    MBPP_PLUS_DATASET,
+    load_benchmark_tasks,
+)
 from idcs.coder import Coder  # noqa: E402
 from idcs.distinguisher import Distinguisher  # noqa: E402
 from idcs.generator import Generator  # noqa: E402
-from idcs.llm import LLM  # noqa: E402
+from idcs.llm import LLM, runtime_snapshot  # noqa: E402
 from idcs.orchestrator import run_episode  # noqa: E402
 from idcs.schemas import Task  # noqa: E402
 from idcs.user_proxy import NullUserProxy  # noqa: E402
@@ -55,6 +63,13 @@ class Counters:
     rescued: int = 0
     regressed: int = 0
     both_failed: int = 0
+    direct_pass_count: int = 0
+    direct_total_count: int = 0
+    spec_pass_count: int = 0
+    spec_total_count: int = 0
+    partial_improved: int = 0
+    partial_regressed: int = 0
+    partial_unchanged: int = 0
 
 
 def _select_tasks(args: argparse.Namespace) -> list[Task]:
@@ -79,16 +94,40 @@ def _score_payload(result: Any) -> dict[str, Any]:
         "pass_rate": result.pass_rate,
         "base_pass_rate": result.base_pass_rate,
         "errors": result.errors,
+        "failure_examples": [
+            asdict(example) for example in getattr(result, "failure_examples", [])
+        ],
         "passed_all": result.total_count > 0 and result.pass_count == result.total_count,
     }
 
 
-def _run_one(task: Task, *, max_turns: int) -> dict[str, Any]:
+def _read_prompt_file(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _run_one(
+    task: Task,
+    *,
+    max_turns: int,
+    generator_prompt: str | None,
+    distinguisher_prompt: str | None,
+    coder_prompt: str | None,
+) -> dict[str, Any]:
     started = time.time()
     llm = LLM()
-    coder = Coder(llm)
-    generator = Generator(llm)
-    distinguisher = Distinguisher(llm)
+    coder = Coder(llm, prompt=coder_prompt) if coder_prompt is not None else Coder(llm)
+    generator = (
+        Generator(llm, prompt=generator_prompt)
+        if generator_prompt is not None
+        else Generator(llm)
+    )
+    distinguisher = (
+        Distinguisher(llm, prompt=distinguisher_prompt)
+        if distinguisher_prompt is not None
+        else Distinguisher(llm)
+    )
 
     direct_code = coder.from_prompt(task.prompt)
     direct_score = score_detailed(task, direct_code)
@@ -111,11 +150,25 @@ def _run_one(task: Task, *, max_turns: int) -> dict[str, Any]:
     }
 
 
-def _run_with_retries(task: Task, *, max_turns: int, retries: int) -> dict[str, Any]:
+def _run_with_retries(
+    task: Task,
+    *,
+    max_turns: int,
+    retries: int,
+    generator_prompt: str | None,
+    distinguisher_prompt: str | None,
+    coder_prompt: str | None,
+) -> dict[str, Any]:
     errors: list[dict[str, str | int]] = []
     for attempt in range(retries + 1):
         try:
-            result = _run_one(task, max_turns=max_turns)
+            result = _run_one(
+                task,
+                max_turns=max_turns,
+                generator_prompt=generator_prompt,
+                distinguisher_prompt=distinguisher_prompt,
+                coder_prompt=coder_prompt,
+            )
             result["attempts"] = attempt + 1
             return result
         except Exception as exc:  # noqa: BLE001 - batch runner should keep going.
@@ -147,6 +200,14 @@ def _record(
         else:
             direct_ok = bool(result["direct"]["passed_all"])
             spec_ok = bool(result["spec_guided"]["passed_all"])
+            direct_pass_count = int(result["direct"]["pass_count"])
+            direct_total_count = int(result["direct"]["total_count"])
+            spec_pass_count = int(result["spec_guided"]["pass_count"])
+            spec_total_count = int(result["spec_guided"]["total_count"])
+            counters.direct_pass_count += direct_pass_count
+            counters.direct_total_count += direct_total_count
+            counters.spec_pass_count += spec_pass_count
+            counters.spec_total_count += spec_total_count
             if not direct_ok:
                 counters.direct_failed += 1
             if not spec_ok:
@@ -157,6 +218,23 @@ def _record(
                 counters.regressed += 1
             if not direct_ok and not spec_ok:
                 counters.both_failed += 1
+            if spec_pass_count > direct_pass_count:
+                counters.partial_improved += 1
+            elif spec_pass_count < direct_pass_count:
+                counters.partial_regressed += 1
+            else:
+                counters.partial_unchanged += 1
+
+        direct_pass_rate = (
+            counters.direct_pass_count / counters.direct_total_count
+            if counters.direct_total_count
+            else 0.0
+        )
+        spec_pass_rate = (
+            counters.spec_pass_count / counters.spec_total_count
+            if counters.spec_total_count
+            else 0.0
+        )
 
         with results_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(result, sort_keys=True) + "\n")
@@ -164,6 +242,11 @@ def _record(
         summary = {
             **meta,
             **asdict(counters),
+            "direct_pass_rate": direct_pass_rate,
+            "spec_pass_rate": spec_pass_rate,
+            "spec_minus_direct_pass_count": (
+                counters.spec_pass_count - counters.direct_pass_count
+            ),
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
         summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
@@ -173,6 +256,7 @@ def _record(
             f"spec_failed={counters.spec_failed} "
             f"rescued={counters.rescued} "
             f"regressed={counters.regressed} "
+            f"partial_delta={counters.spec_pass_count - counters.direct_pass_count} "
             f"errors={counters.errors} "
             f"task={result.get('task_id')} "
             f"attempts={result.get('attempts', 'ERR')}",
@@ -184,7 +268,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--dataset",
-        choices=[MBPP_PLUS_DATASET, HARD_DATASET],
+        choices=[
+            MBPP_PLUS_DATASET,
+            HARD_DATASET,
+            HARD_EXTENDED_DATASET,
+            HARD_TRAIN_DATASET,
+            HARD_DEV_DATASET,
+            HARD_TEST_DATASET,
+        ],
         default=MBPP_PLUS_DATASET,
     )
     parser.add_argument("--workers", type=int, default=4)
@@ -196,6 +287,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--tasks", nargs="*", default=None)
     parser.add_argument("--run-dir", type=Path, default=None)
+    parser.add_argument("--generator-prompt-file", type=Path, default=None)
+    parser.add_argument("--distinguisher-prompt-file", type=Path, default=None)
+    parser.add_argument("--coder-prompt-file", type=Path, default=None)
     return parser.parse_args(argv)
 
 
@@ -205,6 +299,9 @@ def main(argv: list[str]) -> int:
     if not tasks:
         print("No tasks selected.", file=sys.stderr)
         return 1
+    generator_prompt = _read_prompt_file(args.generator_prompt_file)
+    distinguisher_prompt = _read_prompt_file(args.distinguisher_prompt_file)
+    coder_prompt = _read_prompt_file(args.coder_prompt_file)
 
     run_dir = args.run_dir or (
         Path("experiments/runs")
@@ -213,13 +310,23 @@ def main(argv: list[str]) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     results_path = run_dir / "results.jsonl"
     summary_path = run_dir / "summary.json"
+    runtime = runtime_snapshot()
     meta = {
         "dataset": args.dataset,
         "task_count": len(tasks),
         "workers": args.workers,
         "retries": args.retries,
         "max_turns": args.max_turns,
+        **runtime,
+        "runtime": runtime,
         "started_at": datetime.now().isoformat(timespec="seconds"),
+        "generator_prompt_file": str(args.generator_prompt_file)
+        if args.generator_prompt_file
+        else None,
+        "distinguisher_prompt_file": str(args.distinguisher_prompt_file)
+        if args.distinguisher_prompt_file
+        else None,
+        "coder_prompt_file": str(args.coder_prompt_file) if args.coder_prompt_file else None,
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
@@ -239,6 +346,9 @@ def main(argv: list[str]) -> int:
                 task,
                 max_turns=args.max_turns,
                 retries=args.retries,
+                generator_prompt=generator_prompt,
+                distinguisher_prompt=distinguisher_prompt,
+                coder_prompt=coder_prompt,
             ): task
             for task in tasks
         }

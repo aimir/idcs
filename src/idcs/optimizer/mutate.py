@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
 from idcs.llm import LLMClient
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_MUTATOR_SYSTEM = """You improve system prompts in an adversarial
 spec-generation pipeline. Two roles share this loop:
@@ -27,6 +30,10 @@ Rules:
   produce specs; a distinguisher prompt must still critique them.
 - Address the feedback. The feedback names specific failure modes —
   your edits should plausibly improve them.
+- If feedback includes concrete hidden-test failures, infer the reusable
+  semantic rule behind them and add prompt instructions that make the
+  role discover that rule on future tasks. Do not copy the individual
+  failing inputs as a dataset-specific lookup table.
 - Be substantive. Don't paraphrase — make a real change (add a
   principle, drop a constraint, restructure a section).
 - Keep markdown structure (`#`, `##` headings, bullet lists) where the
@@ -61,8 +68,42 @@ class Mutator:
             f"FEEDBACK FROM EVALUATION:\n{feedback}\n\n"
             f"Produce {count} alternative prompts that address the feedback."
         )
-        result = self.llm.complete_typed(
-            self.system_prompt, user, MutationBatch, max_tokens=max_tokens
-        )
-        cleaned = [prompt.strip() for prompt in result.prompts if prompt.strip()]
+        try:
+            result = self.llm.complete_typed(
+                self.system_prompt, user, MutationBatch, max_tokens=max_tokens
+            )
+            prompts = result.prompts
+        except Exception as exc:  # noqa: BLE001 - mutation should degrade, not kill a run.
+            log.warning("structured prompt mutation failed; falling back to plain text: %r", exc)
+            prompts = self._mutate_plain_text(
+                base_prompt,
+                feedback,
+                role=role,
+                count=count,
+                max_tokens=max_tokens,
+            )
+        cleaned = [prompt.strip() for prompt in prompts if prompt.strip()]
         return cleaned[:count]
+
+    def _mutate_plain_text(
+        self,
+        base_prompt: str,
+        feedback: str,
+        *,
+        role: str,
+        count: int,
+        max_tokens: int,
+    ) -> list[str]:
+        prompts: list[str] = []
+        for i in range(count):
+            user = (
+                f"ROLE: {role}\n\n"
+                f"BASE PROMPT:\n{base_prompt}\n\n"
+                f"FEEDBACK FROM EVALUATION:\n{feedback}\n\n"
+                f"Produce alternative prompt {i + 1} of {count}. "
+                "Return only the full prompt text as markdown. Do not wrap it in JSON "
+                "or code fences."
+            )
+            raw = self.llm.complete(self.system_prompt, user, max_tokens=max_tokens)
+            prompts.append(raw.strip())
+        return prompts

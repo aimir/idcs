@@ -8,7 +8,11 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from idcs.benchmark.tasks import (
+    HARD_MBPP_DEV_IDS,
+    HARD_MBPP_EXTENDED_IDS,
     HARD_MBPP_PLUS_IDS,
+    HARD_MBPP_TEST_IDS,
+    HARD_MBPP_TRAIN_IDS,
     load_benchmark_tasks,
     load_mbpp_hard,
     load_mbpp_plus,
@@ -93,6 +97,32 @@ def test_hard_slice_loads_intended_mbpp_plus_ids() -> None:
 
     assert [task.id for task in tasks] == list(HARD_MBPP_PLUS_IDS)
     assert all(task.id.startswith("Mbpp/") for task in tasks)
+
+
+def test_hard_generalization_splits_are_disjoint_and_ordered() -> None:
+    assert HARD_MBPP_TRAIN_IDS == HARD_MBPP_PLUS_IDS
+    assert len(HARD_MBPP_TEST_IDS) > len(HARD_MBPP_TRAIN_IDS)
+    assert not set(HARD_MBPP_TRAIN_IDS) & set(HARD_MBPP_DEV_IDS)
+    assert not set(HARD_MBPP_TRAIN_IDS) & set(HARD_MBPP_TEST_IDS)
+    assert not set(HARD_MBPP_DEV_IDS) & set(HARD_MBPP_TEST_IDS)
+    assert (
+        *HARD_MBPP_TRAIN_IDS,
+        *HARD_MBPP_DEV_IDS,
+        *HARD_MBPP_TEST_IDS,
+    ) == HARD_MBPP_EXTENDED_IDS
+
+
+def test_hard_dev_and_test_splits_load_intended_ids() -> None:
+    fake = {
+        task_id: _fake_evalplus_problem(task_id.replace("/", "_"))
+        for task_id in HARD_MBPP_EXTENDED_IDS
+    }
+    with patch("evalplus.data.get_mbpp_plus", return_value=fake):
+        dev_tasks = load_benchmark_tasks("hard-dev", max_plus_inputs=2)
+        test_tasks = load_benchmark_tasks("hard-test", max_plus_inputs=2)
+
+    assert [task.id for task in dev_tasks] == list(HARD_MBPP_DEV_IDS)
+    assert [task.id for task in test_tasks] == list(HARD_MBPP_TEST_IDS)
 
 
 def test_hard_slice_includes_base_and_plus_hidden_tests() -> None:
